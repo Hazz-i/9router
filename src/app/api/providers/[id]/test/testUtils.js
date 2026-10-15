@@ -21,6 +21,7 @@ import {
   KIMCHI_CONFIG,
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
+import { probeElevenLabsKey } from "@/lib/providers/elevenlabsProbe";
 
 // OAuth provider test endpoints
 const OAUTH_TEST_CONFIG = {
@@ -750,6 +751,8 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         const res = await fetchWithConnectionProxy("https://api.assemblyai.com/v1/account", { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
       }
+      case "elevenlabs":
+        return await probeElevenLabsKey(connection.apiKey, (url, options) => fetchWithConnectionProxy(url, options, effectiveProxy));
       case "nanobanana": {
         const res = await fetchWithConnectionProxy("https://api.nanobananaapi.ai/v1/models", { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };

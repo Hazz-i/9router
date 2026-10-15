@@ -7,6 +7,7 @@ import { openaiToCommandCodeRequest } from "open-sse/translator/request/openai-t
 import { resolveQoderCredentials, resolveQoderModels } from "open-sse/services/qoderModels.js";
 import { probeBedrockCredentials } from "open-sse/executors/bedrock.js";
 import { normalizeProviderId } from "@/lib/providerNormalization";
+import { probeElevenLabsKey } from "@/lib/providers/elevenlabsProbe";
 
 // Probe a webSearch/webFetch provider using its searchConfig/fetchConfig.
 // Returns true if API key is accepted (status !== 401 && !== 403).
@@ -266,61 +267,9 @@ export async function POST(request) {
 
       switch (provider) {
         case "elevenlabs": {
-          // ElevenLabs keys can be full or restricted (e.g. only text_to_speech scope).
-          // 1. Try GET /v1/user first (standard for full/unrestricted keys)
-          const userRes = await fetch("https://api.elevenlabs.io/v1/user", {
-            headers: { "xi-api-key": apiKey },
-            signal: AbortSignal.timeout(8000),
-          });
-          if (userRes.ok) {
-            isValid = true;
-            break;
-          }
-          const userJson = await userRes.json().catch(() => ({}));
-          if (userJson.detail?.status === "invalid_api_key") {
-            isValid = false;
-            error = "Invalid API key";
-            break;
-          }
-          if (userJson.detail?.status === "detected_unusual_activity") {
-            isValid = false;
-            error = userJson.detail.message || "Free Tier access disabled by ElevenLabs (unusual activity detected)";
-            break;
-          }
-
-          // 2. If user_read permission is missing, probe TTS with a non-existent dummy model (__probe__)
-          // ElevenLabs authenticates the key FIRST; model_not_found (400) confirms a valid key without consuming character quota.
-          const ttsProbe = await fetch("https://api.elevenlabs.io/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb", {
-            method: "POST",
-            headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
-            body: JSON.stringify({ text: "test", model_id: "__probe__" }),
-            signal: AbortSignal.timeout(8000),
-          });
-          const ttsJson = await ttsProbe.json().catch(() => ({}));
-
-          if (ttsProbe.status === 400 && ttsJson.detail?.status === "model_not_found") {
-            // Key is valid and allowed to access TTS!
-            isValid = true;
-            break;
-          }
-          if (ttsJson.detail?.status === "detected_unusual_activity") {
-            isValid = false;
-            error = ttsJson.detail.message || "Free Tier access disabled by ElevenLabs (unusual activity detected)";
-            break;
-          }
-          if (ttsJson.detail?.status === "invalid_api_key") {
-            isValid = false;
-            error = "Invalid API key";
-            break;
-          }
-          // If the key is authenticated but missing a specific permission (e.g. only scribe/STT allowed)
-          if (userJson.detail?.status === "missing_permissions" || ttsJson.detail?.status === "missing_permissions") {
-            isValid = true;
-            break;
-          }
-
-          isValid = false;
-          error = ttsJson.detail?.message || userJson.detail?.message || "Invalid API key";
+          const probe = await probeElevenLabsKey(apiKey);
+          isValid = probe.valid;
+          error = probe.error;
           break;
         }
 
