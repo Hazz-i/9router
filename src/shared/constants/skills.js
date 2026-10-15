@@ -1,7 +1,7 @@
 // Agent Skills metadata — single source of truth for /dashboard/skills page.
 // Each skill = 1 raw GitHub URL the user copies and pastes to any AI agent.
 
-const REPO = "decolua/9router";
+const REPO = "Hazz-i/9router";
 const BRANCH = "master";
 const SKILL_PATH = "skills";
 
@@ -24,6 +24,20 @@ export const SKILLS = [
     description: "Chat / code-gen via OpenAI or Anthropic format with streaming.",
     endpoint: "/v1/chat/completions",
     icon: "chat",
+  },
+  {
+    id: "9router-realtime",
+    name: "Realtime Voice",
+    description: "Bidirectional voice conversation via OpenAI Realtime protocol & Gemini Live.",
+    endpoint: "/v1/realtime",
+    icon: "call",
+  },
+  {
+    id: "9router-live-caption",
+    name: "Live Caption",
+    description: "Real-time speech transcription & karaoke subtitle streaming (ElevenLabs Scribe, Deepgram, Gemini).",
+    endpoint: "/v1/audio/live-transcriptions",
+    icon: "closed_caption",
   },
   {
     id: "9router-image",

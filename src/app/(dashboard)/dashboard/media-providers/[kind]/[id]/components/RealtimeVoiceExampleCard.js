@@ -32,6 +32,8 @@ export function RealtimeVoiceExampleCard({ providerId }) {
   const [micVolume, setMicVolume] = useState(0);
 
   const { copied: copiedWs, copy: copyWs } = useCopyToClipboard();
+  const { copied: copiedCode, copy: copyCode } = useCopyToClipboard();
+  const [selectedLang, setSelectedLang] = useState("nodejs");
 
   const wsRef = useRef(null);
   const audioContextInRef = useRef(null);
@@ -521,28 +523,190 @@ export function RealtimeVoiceExampleCard({ providerId }) {
 
       {/* Developer Integration Code Snippet */}
       <div className="flex flex-col gap-2 border-t border-border pt-4">
-        <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">Developer Integration (Python / OpenAI Realtime Client)</span>
-        <pre className="p-3 rounded-lg bg-bg-subtle text-xs font-mono overflow-x-auto text-text-main border border-border">
-{`# Connect using any OpenAI Realtime compatible client
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+            Developer Integration
+          </span>
+          <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-lg border border-border">
+            {[
+              { id: "nodejs", label: "Node.js" },
+              { id: "python", label: "Python" },
+              { id: "cpp", label: "C++ (ESP32 / Arduino)" },
+              { id: "wscat", label: "CLI (wscat)" },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setSelectedLang(tab.id)}
+                className={`px-2.5 py-1 text-xs rounded-md font-medium transition-colors cursor-pointer ${
+                  selectedLang === tab.id
+                    ? "bg-primary text-white shadow-sm"
+                    : "text-text-muted hover:text-text-main"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {(() => {
+          const baseEndpoint = wsUrl.split("?")[0];
+          const activeKey = apiKey || "YOUR_9ROUTER_KEY";
+          const snippets = {
+            nodejs: `// Node.js OpenAI Realtime Compatible Client
+import WebSocket from "ws";
+
+const WS_URL = "${baseEndpoint}?model=gemini-3.8-live&voice=${selectedVoice}";
+const ws = new WebSocket(WS_URL, {
+  headers: { Authorization: "Bearer ${activeKey}" },
+});
+
+ws.on("open", () => {
+  console.log("Connected to 9Router Realtime Voice Gateway");
+
+  // 1. Initialize session configuration
+  ws.send(JSON.stringify({
+    type: "session.update",
+    session: {
+      voice: "${selectedVoice}",
+      instructions: "${instructions.replace(/"/g, '\\"')}",
+      input_audio_format: "pcm16",
+      output_audio_format: "pcm16",
+    },
+  }));
+
+  // 2. Stream raw 16-bit 16kHz PCM audio bytes
+  // ws.send(pcm16Buffer, { binary: true });
+});
+
+ws.on("message", (data, isBinary) => {
+  if (!isBinary) {
+    const event = JSON.parse(data.toString());
+    if (event.type === "response.audio_transcript.delta") {
+      process.stdout.write(event.delta);
+    } else if (event.type === "response.audio.delta") {
+      // 24kHz PCM audio in base64
+      const pcm24k = Buffer.from(event.delta, "base64");
+      // play or pipe pcm24k audio to speaker
+    }
+  }
+});`,
+
+            python: `# Python OpenAI Realtime Compatible Client
 import asyncio
 import websockets
 import json
+import base64
 
-async function voice_session():
-    uri = "${wsUrl.split("?")[0]}?model=gemini-3.8-live"
-    headers = {"Authorization": "Bearer YOUR_9ROUTER_KEY"}
+async def voice_session():
+    uri = "${baseEndpoint}?model=gemini-3.8-live&voice=${selectedVoice}"
+    headers = {"Authorization": "Bearer ${activeKey}"}
+    
     async with websockets.connect(uri, extra_headers=headers) as ws:
         # 1. Update session
         await ws.send(json.dumps({
             "type": "session.update",
-            "session": {"voice": "${selectedVoice}", "instructions": "Halo!"}
+            "session": {
+                "voice": "${selectedVoice}",
+                "instructions": "${instructions.replace(/"/g, '\\"')}"
+            }
         }))
         
-        # 2. Send 16kHz PCM audio chunk
-        # await ws.send(json.dumps({"type": "input_audio_buffer.append", "audio": "<base64_pcm16>"}))
+        # 2. Receive stream events
+        async for msg in ws:
+            event = json.loads(msg)
+            if event.get("type") == "response.audio_transcript.delta":
+                print(event["delta"], end="", flush=True)
+            elif event.get("type") == "response.audio.delta":
+                pcm_chunk = base64.b64decode(event["delta"])
+                # Play 24kHz 16-bit PCM audio chunk
 
-asyncio.run(voice_session())`}
-        </pre>
+asyncio.run(voice_session())`,
+
+            cpp: `// ESP32 / Arduino WebSocket Realtime Voice Client (I2S Mic INMP441 + I2S DAC MAX98357A)
+// Required Libraries in Arduino Library Manager:
+// - ArduinoWebsockets by Gil Maimon
+// - ArduinoJson (v7+)
+#include <WiFi.h>
+#include <ArduinoWebsockets.h>
+#include <ArduinoJson.h>
+
+using namespace websockets;
+WebsocketsClient client;
+
+const char* ssid = "YOUR_WIFI_SSID";
+const char* password = "YOUR_WIFI_PASSWORD";
+// Tip: Use ?apiKey= query parameter for easy authentication on microcontrollers
+const char* ws_url = "${baseEndpoint}?model=gemini-3.8-live&voice=${selectedVoice}&apiKey=${activeKey}";
+
+void onMessageCallback(WebsocketsMessage message) {
+  if (message.isText()) {
+    JsonDocument doc;
+    deserializeJson(doc, message.data());
+    const char* type = doc["type"];
+
+    // 1. Assistant text transcript
+    if (strcmp(type, "response.audio_transcript.delta") == 0) {
+      Serial.printf("AI: %s\\n", doc["delta"].as<const char*>());
+    }
+    // 2. Incoming voice audio (24kHz 16-bit PCM in base64)
+    else if (strcmp(type, "response.audio.delta") == 0) {
+      const char* base64_audio = doc["delta"];
+      // Decode base64 and write directly to I2S DAC speaker (MAX98357A)
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+
+  client.onMessage(onMessageCallback);
+  client.connect(ws_url);
+
+  // Initialize voice session
+  client.send("{\\"type\\":\\"session.update\\",\\"session\\":{\\"voice\\":\\"${selectedVoice}\\",\\"instructions\\":\\"Answer briefly.\\"}}");
+}
+
+void loop() {
+  client.poll();
+
+  // Stream raw 16-bit 16kHz PCM audio bytes from I2S microphone (INMP441)
+  // uint8_t pcmBuffer[1024];
+  // size_t bytesRead = 0;
+  // i2s_read(I2S_NUM_0, pcmBuffer, sizeof(pcmBuffer), &bytesRead, portMAX_DELAY);
+  // if (bytesRead > 0) {
+  //   client.sendBinary((const char*)pcmBuffer, bytesRead);
+  // }
+}`,
+
+            wscat: `# Connect directly via wscat CLI
+wscat -c "${baseEndpoint}?model=gemini-3.8-live&voice=${selectedVoice}&apiKey=${activeKey}"
+
+# In the wscat session, send session initialization:
+{"type":"session.update","session":{"voice":"${selectedVoice}","instructions":"Halo Gemini!"}}`,
+          };
+
+          const currentSnippet = snippets[selectedLang] || snippets.nodejs;
+
+          return (
+            <div className="relative">
+              <button
+                onClick={() => copyCode(currentSnippet)}
+                className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-md bg-surface border border-border hover:bg-surface-2 text-[11px] font-medium text-text-muted hover:text-text-main transition-colors flex items-center gap-1.5 shadow-sm z-10 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[13px]">
+                  {copiedCode ? "check" : "content_copy"}
+                </span>
+                {copiedCode ? "Copied!" : "Copy Code"}
+              </button>
+              <pre className="p-3.5 pt-9 rounded-lg bg-bg-subtle text-xs font-mono overflow-x-auto text-text-main border border-border max-h-96">
+                {currentSnippet}
+              </pre>
+            </div>
+          );
+        })()}
       </div>
     </Card>
   );
