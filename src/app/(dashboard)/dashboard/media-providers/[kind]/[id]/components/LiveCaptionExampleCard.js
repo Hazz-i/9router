@@ -24,8 +24,10 @@ export function LiveCaptionExampleCard({ providerId }) {
   const [connectionStatus, setConnectionStatus] = useState("idle"); // idle | connecting | connected | error
   const [statusMessage, setStatusMessage] = useState("");
   const [words, setWords] = useState([]);
+  const [partialTranscript, setPartialTranscript] = useState("");
   const [activeWordIndex, setActiveWordIndex] = useState(-1);
   const [subtitles, setSubtitles] = useState({ srt: "", ass: "" });
+  const [localEndpoint, setLocalEndpoint] = useState("");
 
   const { copied: copiedWs, copy: copyWs } = useCopyToClipboard();
   const { copied: copiedSrt, copy: copySrt } = useCopyToClipboard();
@@ -66,6 +68,8 @@ export function LiveCaptionExampleCard({ providerId }) {
   }, []);
 
   useEffect(() => {
+    Promise.resolve().then(() => setLocalEndpoint(window.location.origin));
+
     fetch("/api/keys")
       .then((r) => r.json())
       .then((d) => {
@@ -84,8 +88,6 @@ export function LiveCaptionExampleCard({ providerId }) {
       stopRecording();
     };
   }, [stopRecording]);
-
-  const localEndpoint = typeof window !== "undefined" ? window.location.origin : "";
 
   // Auto-scroll transcript container to bottom when new words arrive
   useEffect(() => {
@@ -160,7 +162,10 @@ export function LiveCaptionExampleCard({ providerId }) {
           const data = JSON.parse(event.data);
           if (data.type === "ready") {
             setStatusMessage(`Ready. Upstream provider: ${data.upstream}`);
+          } else if (data.type === "partial") {
+            setPartialTranscript(data.text || "");
           } else if (data.type === "word") {
+            setPartialTranscript("");
             setWords((prev) => {
               const updated = [...prev, data];
               setActiveWordIndex(updated.length - 1);
@@ -174,6 +179,8 @@ export function LiveCaptionExampleCard({ providerId }) {
 
               return updated;
             });
+          } else if (data.type === "chunk") {
+            setPartialTranscript("");
           } else if (data.type === "error") {
             setStatusMessage(`Error: ${data.error}`);
             setConnectionStatus("error");
@@ -203,6 +210,7 @@ export function LiveCaptionExampleCard({ providerId }) {
 
   const handleClear = () => {
     setWords([]);
+    setPartialTranscript("");
     setActiveWordIndex(-1);
     setSubtitles({ srt: "", ass: "" });
   };
@@ -322,7 +330,7 @@ export function LiveCaptionExampleCard({ providerId }) {
         {/* Live Karaoke Caption Visualizer */}
         <div className="relative min-h-[140px] max-h-[220px] overflow-y-auto p-4 rounded-xl border border-border/60 bg-surface-2/40 backdrop-blur-sm flex flex-col justify-between">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-base sm:text-lg leading-relaxed">
-            {words.length === 0 ? (
+            {words.length === 0 && !partialTranscript ? (
               <span className="text-xs text-text-muted/60 italic">
                 {isRecording ? "Listening... Speak into your microphone" : "Click 'Start Microphone' to begin real-time live captioning"}
               </span>
@@ -343,6 +351,11 @@ export function LiveCaptionExampleCard({ providerId }) {
                   </span>
                 );
               })
+            )}
+            {partialTranscript && (
+              <span className="basis-full text-sm text-text-muted italic">
+                In progress · {partialTranscript}
+              </span>
             )}
             <div ref={transcriptEndRef} />
           </div>

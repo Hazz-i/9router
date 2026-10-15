@@ -24,6 +24,7 @@ export function RealtimeVoiceExampleCard({ providerId }) {
   const [apiKey, setApiKey] = useState("");
   const [useTunnel, setUseTunnel] = useState(false);
   const [tunnelEndpoint, setTunnelEndpoint] = useState("");
+  const [localEndpoint, setLocalEndpoint] = useState("");
 
   const [isCalling, setIsCalling] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("idle"); // idle | connecting | connected | speaking | listening | error
@@ -89,6 +90,8 @@ export function RealtimeVoiceExampleCard({ providerId }) {
   }, []);
 
   useEffect(() => {
+    Promise.resolve().then(() => setLocalEndpoint(window.location.origin));
+
     fetch("/api/keys")
       .then((r) => r.json())
       .then((d) => {
@@ -108,7 +111,6 @@ export function RealtimeVoiceExampleCard({ providerId }) {
     };
   }, [stopCall]);
 
-  const localEndpoint = typeof window !== "undefined" ? window.location.origin : "";
   const endpoint = useTunnel ? tunnelEndpoint : localEndpoint;
   const wsProtocol = endpoint.startsWith("https") ? "wss:" : "ws:";
   const wsHost = endpoint.replace(/^https?:\/\//, "");
