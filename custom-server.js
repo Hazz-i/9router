@@ -4,6 +4,49 @@ const fs = require("fs");
 const crypto = require("crypto");
 const { pathToFileURL } = require("url");
 
+// Register ESM alias resolver hook for '@/...' and 'open-sse/...'
+try {
+  const { register } = require("node:module");
+  if (typeof register === "function") {
+    const projectRoot = __dirname;
+    const hookCode = `
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
+import fs from 'node:fs';
+
+const projectRoot = ${JSON.stringify(projectRoot)};
+
+export async function resolve(specifier, context, nextResolve) {
+  let targetPath = null;
+  if (specifier.startsWith('@/')) {
+    targetPath = path.join(projectRoot, 'src', specifier.slice(2));
+  } else if (specifier === 'open-sse' || specifier.startsWith('open-sse/')) {
+    targetPath = path.join(projectRoot, 'open-sse', specifier.slice(8));
+  }
+
+  if (targetPath) {
+    const candidates = [
+      targetPath,
+      targetPath + '.js',
+      targetPath + '.mjs',
+      targetPath + '.json',
+      path.join(targetPath, 'index.js')
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c) && !fs.statSync(c).isDirectory()) {
+        return nextResolve(pathToFileURL(c).href, context);
+      }
+    }
+  }
+  return nextResolve(specifier, context);
+}
+`;
+    register("data:text/javascript;base64," + Buffer.from(hookCode).toString("base64"));
+  }
+} catch {
+  // Ignore if module.register not supported
+}
+
 const origCreate = http.createServer.bind(http);
 
 // Per-process secret proving x-9r-real-ip was stamped below rather than sent by the client.
@@ -130,29 +173,40 @@ http.createServer = (...args) => {
   server.once("listening", () => {
     startBackgroundTokenRefreshFromCustomServer();
   });
+  const handleWsUpgrade = (req, socket, head) => {
+    const upgradeHeader = String(req.headers.upgrade || "").toLowerCase();
+    if (upgradeHeader === "websocket") {
+      const pathname = (req.url || "").split("?")[0];
+      if (pathname === "/v1/audio/live-transcriptions" || pathname === "/api/v1/audio/live-transcriptions") {
+        const wss = getLiveWsServer();
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          wss.emit("connection", ws, req);
+        });
+        return true;
+      }
+      if (pathname === "/v1/realtime" || pathname === "/api/v1/realtime") {
+        const wss = getRealtimeWsServer();
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          wss.emit("connection", ws, req);
+        });
+        return true;
+      }
+    }
+    return false;
+  };
+
+  server.on("upgrade", (req, socket, head) => {
+    handleWsUpgrade(req, socket, head);
+  });
+
   const origEmit = server.emit;
   // Handle WebSockets for live captions and h2c upgrades from JBR 25
   server.emit = function (event, ...eventArgs) {
     const [req, socket, head] = eventArgs;
     if (event === "upgrade") {
+      const handled = handleWsUpgrade(req, socket, head);
+      if (handled) return true;
       const upgradeHeader = String(req.headers.upgrade || "").toLowerCase();
-      if (upgradeHeader === "websocket") {
-        const pathname = (req.url || "").split("?")[0];
-        if (pathname === "/v1/audio/live-transcriptions" || pathname === "/api/v1/audio/live-transcriptions") {
-          const wss = getLiveWsServer();
-          wss.handleUpgrade(req, socket, head, (ws) => {
-            wss.emit("connection", ws, req);
-          });
-          return true;
-        }
-        if (pathname === "/v1/realtime" || pathname === "/api/v1/realtime") {
-          const wss = getRealtimeWsServer();
-          wss.handleUpgrade(req, socket, head, (ws) => {
-            wss.emit("connection", ws, req);
-          });
-          return true;
-        }
-      }
       if (upgradeHeader !== "h2c") {
         return origEmit.call(this, event, ...eventArgs);
       }
@@ -202,6 +256,12 @@ http.createServer = (...args) => {
 };
 
 if (require.main === module) {
+  const selfPath = path.resolve(__filename);
+  const existingNodeOptions = process.env.NODE_OPTIONS || "";
+  if (!existingNodeOptions.includes(selfPath)) {
+    process.env.NODE_OPTIONS = `${existingNodeOptions} --require ${selfPath}`.trim();
+  }
+
   const standalone = path.join(__dirname, "server.js");
   if (fs.existsSync(standalone)) {
     require(standalone);

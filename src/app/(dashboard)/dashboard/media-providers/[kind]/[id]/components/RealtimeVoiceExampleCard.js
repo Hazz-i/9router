@@ -110,7 +110,7 @@ export function RealtimeVoiceExampleCard({ providerId }) {
   const endpoint = useTunnel ? tunnelEndpoint : localEndpoint;
   const wsProtocol = endpoint.startsWith("https") ? "wss:" : "ws:";
   const wsHost = endpoint.replace(/^https?:\/\//, "");
-  const wsUrl = `${wsProtocol}//${wsHost}/v1/realtime?model=gemini-2.0-flash-exp&voice=${encodeURIComponent(selectedVoice)}${apiKey ? `&apiKey=${encodeURIComponent(apiKey)}` : ""}`;
+  const wsUrl = `${wsProtocol}//${wsHost}/v1/realtime?model=gemini-3.8-live&voice=${encodeURIComponent(selectedVoice)}${apiKey ? `&apiKey=${encodeURIComponent(apiKey)}` : ""}`;
 
   // Auto-scroll transcript container to bottom when messages update
   useEffect(() => {
@@ -529,7 +529,7 @@ import websockets
 import json
 
 async function voice_session():
-    uri = "${wsUrl.split("?")[0]}?model=gemini-2.0-flash-exp"
+    uri = "${wsUrl.split("?")[0]}?model=gemini-3.8-live"
     headers = {"Authorization": "Bearer YOUR_9ROUTER_KEY"}
     async with websockets.connect(uri, extra_headers=headers) as ws:
         # 1. Update session

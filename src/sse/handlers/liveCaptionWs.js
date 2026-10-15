@@ -48,9 +48,10 @@ export async function handleLiveTranscriptionConnection(clientWs, req) {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   log.info("LIVE_CAPTION", `New WS connection from ${req.headers["x-9r-real-ip"] || req.socket.remoteAddress} - ${req.url}`);
 
+  let token = null;
   const settings = await getSettings();
   if (settings.requireApiKey) {
-    const token = extractTokenFromRequest(req, url);
+    token = extractTokenFromRequest(req, url);
     if (!token || !(await isValidApiKey(token))) {
       log.warn("LIVE_CAPTION", "Unauthorized WS connection rejected");
       clientWs.send(JSON.stringify({ type: "error", code: 4401, error: "Unauthorized: Invalid or missing API key" }));
@@ -143,6 +144,17 @@ export async function handleLiveTranscriptionConnection(clientWs, req) {
         language,
         sampleRate,
         requestedEncoding,
+        sessionWords,
+        setUpstream: (ws) => { upstreamWs = ws; },
+        cleanup,
+      });
+    } else if (canonicalProvider === "elevenlabs" || canonicalProvider === "el") {
+      await setupElevenLabsScribeUpstream({
+        clientWs,
+        credentials,
+        model,
+        language,
+        sampleRate,
         sessionWords,
         setUpstream: (ws) => { upstreamWs = ws; },
         cleanup,
@@ -301,15 +313,183 @@ async function setupDeepgramUpstream({ clientWs, credentials, model, language, s
 }
 
 /**
+ * Setup ElevenLabs Scribe real-time streaming WebSocket
+ */
+async function setupElevenLabsScribeUpstream({ clientWs, credentials, model, language, sampleRate, sessionWords, setUpstream, cleanup }) {
+  const token = credentials.apiKey;
+  if (!token) throw new Error("Missing ElevenLabs API key");
+
+  // ElevenLabs real-time endpoint only accepts scribe_v2_realtime
+  const elParams = new URLSearchParams({
+    model_id: "scribe_v2_realtime",
+    audio_format: `pcm_${sampleRate || 16000}`,
+    include_timestamps: "true",
+  });
+  if (language && language !== "auto") {
+    elParams.set("language_code", language);
+  }
+
+  const elUrl = `wss://api.elevenlabs.io/v1/speech-to-text/realtime?${elParams.toString()}`;
+  const elWs = new WebSocket(elUrl, {
+    headers: {
+      "xi-api-key": token,
+    },
+  });
+  setUpstream(elWs);
+
+  elWs.on("open", () => {
+    log.info("LIVE_CAPTION", "ElevenLabs Scribe upstream WebSocket connected");
+  });
+
+  let currentStart = 0;
+
+  elWs.on("message", (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+
+      if (msg.message_type === "session_started") {
+        log.info("LIVE_CAPTION", `ElevenLabs Scribe session started: ${msg.session_id}`);
+        clientWs.send(JSON.stringify({ type: "ready", upstream: "elevenlabs-scribe" }));
+        return;
+      }
+
+      if (msg.message_type === "partial_transcript" && msg.text?.trim()) {
+        clientWs.send(JSON.stringify({
+          type: "partial",
+          text: msg.text.trim(),
+          isFinal: false,
+        }));
+      } else if (msg.message_type === "committed_transcript_with_timestamps") {
+        const words = (msg.words || []).filter((w) => w.type === "word" && w.text?.trim());
+        for (const w of words) {
+          const wordObj = {
+            word: w.text.trim(),
+            start: typeof w.start === "number" ? w.start : currentStart,
+            end: typeof w.end === "number" ? w.end : currentStart + 0.3,
+            confidence: typeof w.logprob === "number" ? Math.min(1, Math.exp(w.logprob)) : 0.95,
+            isFinal: true,
+          };
+          currentStart = Math.max(currentStart, wordObj.end);
+          sessionWords.push(wordObj);
+          clientWs.send(JSON.stringify({
+            type: "word",
+            ...wordObj,
+          }));
+        }
+
+        if (msg.text?.trim()) {
+          const firstWord = words[0];
+          const lastWord = words[words.length - 1];
+          clientWs.send(JSON.stringify({
+            type: "chunk",
+            chunk: {
+              text: msg.text.trim(),
+              start: firstWord?.start ?? currentStart,
+              end: lastWord?.end ?? currentStart,
+            },
+          }));
+        }
+      } else if (msg.message_type === "committed_transcript" && msg.text?.trim()) {
+        const text = msg.text.trim();
+        const wordTokens = text.split(/\s+/);
+        const duration = Math.max(0.4, wordTokens.length * 0.3);
+        const chunkObj = {
+          text,
+          start: currentStart,
+          end: currentStart + duration,
+        };
+
+        for (const w of wordTokens) {
+          const wordObj = {
+            word: w,
+            start: currentStart,
+            end: currentStart + 0.3,
+            confidence: 0.95,
+            isFinal: true,
+          };
+          sessionWords.push(wordObj);
+          clientWs.send(JSON.stringify({
+            type: "word",
+            ...wordObj,
+          }));
+        }
+        currentStart += duration;
+
+        clientWs.send(JSON.stringify({
+          type: "chunk",
+          chunk: chunkObj,
+        }));
+      }
+    } catch (e) {
+      log.error("LIVE_CAPTION", `ElevenLabs Scribe parse error: ${e.message}`);
+    }
+  });
+
+  elWs.on("error", (err) => {
+    log.error("LIVE_CAPTION", `ElevenLabs Scribe upstream error: ${err.message}`);
+    clientWs.send(JSON.stringify({ type: "error", error: `ElevenLabs Scribe: ${err.message}` }));
+  });
+
+  elWs.on("close", (code, reason) => {
+    log.info("LIVE_CAPTION", `ElevenLabs Scribe upstream closed (${code}): ${reason}`);
+    clientWs.send(JSON.stringify({ type: "upstream_closed", code, reason: reason?.toString() }));
+  });
+
+  // Client to ElevenLabs forwarding
+  clientWs.on("message", (data, isBinary) => {
+    if (isBinary) {
+      if (elWs.readyState === WebSocket.OPEN) {
+        elWs.send(JSON.stringify({
+          message_type: "input_audio_chunk",
+          audio_base_64: Buffer.from(data).toString("base64"),
+        }));
+      }
+    } else {
+      try {
+        const cmd = JSON.parse(data.toString());
+        if (cmd.type === "finalize") {
+          if (elWs.readyState === WebSocket.OPEN) {
+            elWs.send(JSON.stringify({
+              message_type: "input_audio_chunk",
+              audio_base_64: "",
+              commit: true,
+            }));
+          }
+        } else if (cmd.type === "get_subtitles") {
+          const chunks = chunkWords(sessionWords);
+          const srt = chunksToSrt(chunks);
+          const ass = chunksToAss(chunks);
+          clientWs.send(JSON.stringify({
+            type: "subtitles",
+            format: cmd.format || "all",
+            srt,
+            ass,
+            chunks,
+          }));
+        }
+      } catch {
+        // Not a control JSON command, ignore
+      }
+    }
+  });
+}
+
+/**
  * Setup Gemini Live bidirectional streaming WebSocket
  */
 async function setupGeminiLiveUpstream({ clientWs, credentials, model, language, sessionWords, setUpstream, cleanup }) {
   const token = credentials.apiKey;
   if (!token) throw new Error("Missing Gemini API key");
 
-  const actualModel = model || "gemini-2.5-flash-native-audio-preview-09-17";
-  const baseUrl = "https://generativelanguage.googleapis.com/v1beta/models";
-  const wsUrl = toGeminiLiveWsUrl(baseUrl, actualModel, token);
+  let actualModel = model || "gemini-3.8-live";
+  if (
+    actualModel === "gemini-2.0-flash-exp" ||
+    actualModel === "gemini-2.0-flash-realtime" ||
+    actualModel === "gemini-2.5-flash-native-audio-preview-09-17"
+  ) {
+    actualModel = "gemini-3.8-live";
+  }
+  const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(token)}`;
 
   const geminiWs = new WebSocket(wsUrl);
   setUpstream(geminiWs);
@@ -321,8 +501,12 @@ async function setupGeminiLiveUpstream({ clientWs, credentials, model, language,
       setup: {
         model: `models/${actualModel}`,
         generationConfig: {
-          responseModalities: ["TEXT"],
-          inputAudioTranscription: {},
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: "Puck" },
+            },
+          },
         },
         systemInstruction: {
           parts: [{ text: language ? `Transcribe the spoken audio verbatim in language ${language}.` : "Transcribe the spoken audio verbatim." }],
@@ -343,7 +527,7 @@ async function setupGeminiLiveUpstream({ clientWs, credentials, model, language,
         return;
       }
 
-      const delta = frame.serverContent?.inputTranscription?.text;
+      const delta = frame.serverContent?.outputTranscription?.text || frame.serverContent?.inputTranscription?.text;
       if (typeof delta === "string" && delta.trim()) {
         const now = Date.now();
         const wordText = delta.trim();

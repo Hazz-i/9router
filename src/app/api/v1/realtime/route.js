@@ -21,10 +21,10 @@ export async function GET() {
       endpoint: "/v1/realtime",
       protocolFormat: "OpenAI Realtime API compatible",
       backend: "Google Gemini Multimodal Live API",
-      defaultModel: "gemini-2.0-flash-exp",
+      defaultModel: "gemini-3.8-live",
       supportedVoices: ["Puck", "Charon", "Kore", "Fenrir", "Aoede"],
       queryParameters: {
-        model: "Model ID (default: gemini/gemini-2.0-flash-exp)",
+        model: "Model ID (default: gemini/gemini-3.8-live)",
         voice: "Voice name (default: Puck)",
         apiKey: "NineRouter API Key (if required by settings)",
       },

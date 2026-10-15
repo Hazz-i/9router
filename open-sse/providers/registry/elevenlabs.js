@@ -23,6 +23,12 @@ export default {
   // the incoming request's own fields, so a new scribe model needs only a `models` entry.
   models: [
     {
+      id: "scribe_v2_realtime",
+      name: "Scribe v2 Realtime (Live)",
+      params: ["language"],
+      kinds: ["liveCaption", "stt"]
+    },
+    {
       id: "scribe_v1",
       name: "Scribe v1",
       params: ["language", "response_format", "timestamps_granularity", "tag_audio_events", "diarize", "num_speakers"],
@@ -36,10 +42,11 @@ export default {
     },
   ],
   liveCaptionConfig: {
-    baseUrl: "https://api.elevenlabs.io/v1/speech-to-text",
+    wsUrl: "wss://api.elevenlabs.io/v1/speech-to-text/realtime",
+    defaultModel: "scribe_v2_realtime",
     authType: "apikey",
     authHeader: "xi-api-key",
-    format: "elevenlabs-stt",
+    format: "elevenlabs-scribe",
   },
   ttsConfig: {
     baseUrl: "https://api.elevenlabs.io/v1/text-to-speech",

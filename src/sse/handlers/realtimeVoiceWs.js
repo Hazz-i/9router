@@ -32,9 +32,17 @@ function extractTokenFromRequest(req, url) {
 }
 
 function formatGeminiModel(modelName) {
-  if (!modelName) return "models/gemini-2.0-flash-exp";
-  const clean = modelName.replace(/^gemini\//, "");
-  return clean.startsWith("models/") ? clean : `models/${clean}`;
+  if (!modelName) return "models/gemini-3.8-live";
+  let clean = modelName.replace(/^gemini\//, "").replace(/^models\//, "");
+  // Map older / deprecated preview models to current supported live models
+  if (
+    clean === "gemini-2.0-flash-exp" ||
+    clean === "gemini-2.0-flash-realtime" ||
+    clean === "gemini-2.5-flash-native-audio-preview-09-17"
+  ) {
+    clean = "gemini-3.8-live";
+  }
+  return `models/${clean}`;
 }
 
 export function getRealtimeWsServer() {
@@ -76,10 +84,10 @@ export async function handleRealtimeVoiceConnection(clientWs, req) {
   }
 
   // Resolve requested model & voice
-  const rawModelParam = url.searchParams.get("model") || "gemini/gemini-2.0-flash-exp";
+  const rawModelParam = url.searchParams.get("model") || "gemini/gemini-3.8-live";
   const voiceParam = url.searchParams.get("voice") || "Puck";
   const modelInfo = await getModelInfo(rawModelParam);
-  const targetModel = modelInfo?.model || "gemini-2.0-flash-exp";
+  const targetModel = modelInfo?.model || "gemini-3.8-live";
   const provider = resolveProviderId(modelInfo?.provider || "gemini");
 
   // Lookup provider credentials
@@ -110,7 +118,7 @@ export async function handleRealtimeVoiceConnection(clientWs, req) {
   }
 
   const geminiConfig = AI_PROVIDERS.gemini?.realtimeConfig || {};
-  const bidiBaseUrl = geminiConfig.bidiUrl || "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
+  const bidiBaseUrl = geminiConfig.bidiUrl || "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
   const geminiWsUrl = `${bidiBaseUrl}?key=${encodeURIComponent(apiKey)}`;
 
   log.info("REALTIME_VOICE", `Establishing upstream connection to Gemini Live: ${formatGeminiModel(targetModel)} with voice ${voiceParam}`);
@@ -179,6 +187,21 @@ export async function handleRealtimeVoiceConnection(clientWs, req) {
     try {
       const msg = JSON.parse(raw.toString("utf8"));
 
+      // Error from Gemini frame
+      if (msg.error) {
+        log.error("REALTIME_VOICE", `Gemini returned error frame: ${JSON.stringify(msg.error)}`);
+        clientWs.send(
+          JSON.stringify({
+            type: "error",
+            error: {
+              type: "upstream_error",
+              message: msg.error.message || "Gemini Live error",
+            },
+          })
+        );
+        return;
+      }
+
       // 1. Setup complete
       if (msg.setupComplete) {
         log.info("REALTIME_VOICE", "Gemini Live setup complete");
@@ -234,6 +257,20 @@ export async function handleRealtimeVoiceConnection(clientWs, req) {
           currentResponseId = `resp_${crypto.randomBytes(12).toString("hex")}`;
           currentItemId = `item_${crypto.randomBytes(12).toString("hex")}`;
           return;
+        }
+
+        // Audio output transcription
+        if (sc.outputTranscription?.text) {
+          clientWs.send(
+            JSON.stringify({
+              type: "response.audio_transcript.delta",
+              response_id: currentResponseId,
+              item_id: currentItemId,
+              output_index: 0,
+              content_index: 0,
+              delta: sc.outputTranscription.text,
+            })
+          );
         }
 
         // Parts in model turn
@@ -325,7 +362,7 @@ export async function handleRealtimeVoiceConnection(clientWs, req) {
   clientWs.on("message", (data, isBinary) => {
     try {
       // 1. Binary payload: raw audio chunk from client
-      if (isBinary || Buffer.isBuffer(data)) {
+      if (isBinary) {
         inputAudioBytes += data.length;
         if (!setupSent) sendSetupToGemini();
         if (upstreamWs?.readyState === WebSocket.OPEN) {
@@ -401,8 +438,9 @@ export async function handleRealtimeVoiceConnection(clientWs, req) {
           break;
         }
 
+        case "input_audio_buffer.commit":
         case "response.create": {
-          // If client explicitly triggers a response
+          // If client explicitly triggers a response or commits audio
           if (upstreamWs?.readyState === WebSocket.OPEN) {
             upstreamWs.send(
               JSON.stringify({
@@ -410,7 +448,7 @@ export async function handleRealtimeVoiceConnection(clientWs, req) {
                   turns: [
                     {
                       role: "user",
-                      parts: [{ text: "Please respond." }],
+                      parts: [{ text: "" }],
                     },
                   ],
                   turnComplete: true,
