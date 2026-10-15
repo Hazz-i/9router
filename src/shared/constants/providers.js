@@ -78,7 +78,7 @@ export const MEDIA_PROVIDER_KINDS = [
   { id: "tts",         label: "Text To Speech", icon: "record_voice_over", endpoint: { method: "POST", path: "/v1/audio/speech" } },
   { id: "stt",         label: "Speech To Text", icon: "mic",               endpoint: { method: "POST", path: "/v1/audio/transcriptions" } },
   { id: "liveCaption", label: "Live Caption",   icon: "closed_caption",    endpoint: { method: "WS",   path: "/v1/audio/live-transcriptions" } },
-  { id: "realtime",    label: "Realtime Voice", icon: "record_voice_over", endpoint: { method: "WS",   path: "/v1/realtime" }, isNew: true },
+  { id: "realtime",    label: "Realtime Voice", icon: "phone_in_talk",     endpoint: { method: "WS",   path: "/v1/realtime" }, isNew: true },
   { id: "webSearch",   label: "Web Search",     icon: "travel_explore",    endpoint: { method: "POST", path: "/v1/search" } },
   { id: "webFetch",    label: "Web Fetch",      icon: "language",          endpoint: { method: "POST", path: "/v1/web/fetch" } },
   { id: "video",       label: "Video",          icon: "movie",             endpoint: { method: "POST", path: "/v1/videos/generations" } },

@@ -58,7 +58,7 @@ export default {
     { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", params: ["language","prompt"], kind: "stt" },
     { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite (Cheapest)", params: ["language","prompt"], kind: "stt" },
     { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", params: ["language","prompt"], kind: "stt" },
-    { id: "gemini-2.5-flash-native-audio-preview-09-17", name: "Gemini Live Transcription (Realtime)", params: ["language","prompt","system_instruction","setup_timeout_ms","turn_timeout_ms"], kinds: ["stt", "liveCaption"], transport: "gemini-live" },
+    { id: "gemini-2.5-flash-native-audio-preview-09-17", name: "Gemini 2.5 Flash Native Audio (Live)", params: ["language","prompt","system_instruction","setup_timeout_ms","turn_timeout_ms"], kinds: ["realtime"], transport: "gemini-live" },
     { id: "gemini-3.1-flash-tts-preview", name: "Gemini 3.1 Flash TTS", kind: "tts" },
     { id: "gemini-2.5-flash-preview-tts", name: "Gemini 2.5 Flash TTS", kind: "tts" },
     { id: "gemini-2.5-pro-preview-tts", name: "Gemini 2.5 Pro TTS", kind: "tts" },
@@ -66,7 +66,7 @@ export default {
     { id: "gemini-2.0-flash-realtime", name: "Gemini 2.0 Flash Realtime", kinds: ["realtime"], transport: "gemini-live" },
     { id: "embedding-001", name: "Embedding 001", dimensions: 768, kind: "embedding" },
   ],
-  serviceKinds: ["llm","embedding","image","imageToText","webSearch","tts","stt","liveCaption","realtime"],
+  serviceKinds: ["llm","embedding","image","imageToText","webSearch","tts","stt","realtime"],
   realtimeConfig: {
     bidiUrl: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent",
     defaultModel: "gemini-2.0-flash-exp",
@@ -75,12 +75,6 @@ export default {
     audioOutRate: 24000,
     authType: "apikey",
     authQueryParam: "key",
-  },
-  liveCaptionConfig: {
-    baseUrl: "https://generativelanguage.googleapis.com/v1beta/models",
-    authType: "apikey",
-    authHeader: "key",
-    format: "gemini-live",
   },
   ttsConfig: {
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/models",
