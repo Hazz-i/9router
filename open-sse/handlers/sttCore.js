@@ -130,7 +130,8 @@ async function transcribeGemini(cfg, file, model, token, formData) {
 async function transcribeElevenLabs(cfg, file, model, token, formData) {
   const fd = new FormData();
   fd.append("file", file, file.name || "audio.wav");
-  fd.append("model_id", model);
+  const cleanModel = (model || "scribe_v2").replace(/^elevenlabs\//, "").replace(/^el\//, "");
+  fd.append("model_id", cleanModel);
 
   const get = (k) => {
     const v = formData?.get?.(k);

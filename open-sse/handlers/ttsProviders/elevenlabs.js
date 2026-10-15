@@ -10,23 +10,47 @@ export async function fetchElevenLabsVoices(apiKey) {
   const cached = _voicesCache.get(apiKey);
   if (cached && now - cached.time < VOICES_TTL) return cached.voices;
 
-  const res = await fetch("https://api.elevenlabs.io/v1/voices", {
-    headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
-  });
-  if (!res.ok) throw new Error(`ElevenLabs voices fetch failed: ${res.status}`);
-  const data = await res.json();
-  // Normalize: derive lang from labels for grouping
-  const voices = (data.voices || []).map((v) => ({ ...v, lang: v.labels?.language || "en" }));
-  _voicesCache.set(apiKey, { voices, time: now });
-  return voices;
+  try {
+    const res = await fetch("https://api.elevenlabs.io/v1/voices", {
+      headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
+    });
+    if (!res.ok) {
+      // If API key is missing voices_read permission or unauthorized, return null for fallback catalog
+      if (res.status === 401 || res.status === 403) {
+        return null;
+      }
+      throw new Error(`ElevenLabs voices fetch failed: ${res.status}`);
+    }
+    const data = await res.json();
+    // Normalize: derive lang from labels for grouping
+    const voices = (data.voices || []).map((v) => ({ ...v, lang: v.labels?.language || "en" }));
+    _voicesCache.set(apiKey, { voices, time: now });
+    return voices;
+  } catch (err) {
+    if (err.message?.includes("401") || err.message?.includes("403")) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 export default {
   async synthesize(text, model, credentials) {
     if (!credentials?.apiKey) throw new Error("ElevenLabs API key required");
-    let modelId = "eleven_flash_v2_5";
-    let voiceId = model;
-    if (model && model.includes("/")) [modelId, voiceId] = model.split("/");
+    let modelId = "eleven_multilingual_v2";
+    let voiceId = "JBFqnCBsd6RMkjVDRZzb"; // Default to George (free-tier supported)
+    if (model) {
+      const clean = model.replace(/^el\//, "").replace(/^elevenlabs\//, "");
+      if (clean.includes("/")) {
+        const parts = clean.split("/");
+        modelId = parts[0] || modelId;
+        voiceId = parts[1] || voiceId;
+      } else if (clean.startsWith("eleven_")) {
+        modelId = clean;
+      } else {
+        voiceId = clean;
+      }
+    }
 
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: "POST",

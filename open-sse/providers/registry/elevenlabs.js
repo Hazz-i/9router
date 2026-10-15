@@ -23,6 +23,12 @@ export default {
   // the incoming request's own fields, so a new scribe model needs only a `models` entry.
   models: [
     {
+      id: "scribe_v2",
+      name: "Scribe v2 (High Accuracy)",
+      params: ["language", "response_format", "timestamps_granularity", "tag_audio_events", "diarize", "num_speakers"],
+      kinds: ["stt", "liveCaption"]
+    },
+    {
       id: "scribe_v2_realtime",
       name: "Scribe v2 Realtime (Live)",
       params: ["language"],
@@ -30,15 +36,39 @@ export default {
     },
     {
       id: "scribe_v1",
-      name: "Scribe v1",
+      name: "Scribe v1 (Legacy)",
       params: ["language", "response_format", "timestamps_granularity", "tag_audio_events", "diarize", "num_speakers"],
       kinds: ["stt", "liveCaption"]
     },
     {
-      id: "scribe_v2",
-      name: "Scribe v2",
-      params: ["language", "response_format", "timestamps_granularity", "tag_audio_events", "diarize", "num_speakers"],
-      kinds: ["stt", "liveCaption"]
+      id: "eleven_flash_v2_5",
+      name: "Eleven Flash v2.5 (Fastest, ~75ms)",
+      kinds: ["tts"]
+    },
+    {
+      id: "eleven_turbo_v2_5",
+      name: "Eleven Turbo v2.5 (High Quality Multilingual)",
+      kinds: ["tts"]
+    },
+    {
+      id: "eleven_multilingual_v2",
+      name: "Eleven Multilingual v2 (Rich Expressive)",
+      kinds: ["tts"]
+    },
+    {
+      id: "eleven_flash_v2",
+      name: "Eleven Flash v2 (Fastest English)",
+      kinds: ["tts"]
+    },
+    {
+      id: "eleven_turbo_v2",
+      name: "Eleven Turbo v2 (English)",
+      kinds: ["tts"]
+    },
+    {
+      id: "eleven_monolingual_v1",
+      name: "Eleven Monolingual v1 (English Legacy)",
+      kinds: ["tts"]
     },
   ],
   liveCaptionConfig: {
@@ -50,17 +80,34 @@ export default {
   },
   ttsConfig: {
     baseUrl: "https://api.elevenlabs.io/v1/text-to-speech",
+    defaultModel: "eleven_flash_v2_5",
     authType: "apikey",
     authHeader: "xi-api-key",
     format: "elevenlabs",
     models: [
       {
-        id: "eleven_multilingual_v2",
-        name: "Eleven Multilingual v2"
+        id: "eleven_flash_v2_5",
+        name: "Flash v2.5 (Fastest, ~75ms)"
       },
       {
         id: "eleven_turbo_v2_5",
-        name: "Eleven Turbo v2.5"
+        name: "Turbo v2.5 (High Quality Multilingual)"
+      },
+      {
+        id: "eleven_multilingual_v2",
+        name: "Multilingual v2 (Rich Expressive)"
+      },
+      {
+        id: "eleven_flash_v2",
+        name: "Flash v2 (Fastest English)"
+      },
+      {
+        id: "eleven_turbo_v2",
+        name: "Turbo v2 (English)"
+      },
+      {
+        id: "eleven_monolingual_v1",
+        name: "Monolingual v1 (English Legacy)"
       }
     ]
   },
