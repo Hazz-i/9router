@@ -199,10 +199,12 @@ function AddApiKeyModal({ isOpen, provider, providerName, proxyPools, onSave, on
   const [formData, setFormData] = useState({ name: "", apiKey: "", priority: 1, proxyPoolId: NONE });
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
+  const [validationError, setValidationError] = useState("");
   const [saving, setSaving] = useState(false);
 
   const handleValidate = async () => {
     setValidating(true);
+    setValidationError("");
     try {
       const res = await fetch("/api/providers/validate", {
         method: "POST",
@@ -211,8 +213,15 @@ function AddApiKeyModal({ isOpen, provider, providerName, proxyPools, onSave, on
       });
       const data = await res.json();
       setValidationResult(data.valid ? "success" : "failed");
-    } catch { setValidationResult("failed"); }
-    finally { setValidating(false); }
+      if (!data.valid && data.error) {
+        setValidationError(data.error);
+      }
+    } catch {
+      setValidationResult("failed");
+      setValidationError("Failed to connect to validation endpoint");
+    } finally {
+      setValidating(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -221,7 +230,9 @@ function AddApiKeyModal({ isOpen, provider, providerName, proxyPools, onSave, on
     try {
       let isValid = false;
       try {
-        setValidating(true); setValidationResult(null);
+        setValidating(true);
+        setValidationResult(null);
+        setValidationError("");
         const res = await fetch("/api/providers/validate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -230,8 +241,14 @@ function AddApiKeyModal({ isOpen, provider, providerName, proxyPools, onSave, on
         const data = await res.json();
         isValid = !!data.valid;
         setValidationResult(isValid ? "success" : "failed");
-      } catch { setValidationResult("failed"); }
-      finally { setValidating(false); }
+        if (!isValid && data.error) {
+          setValidationError(data.error);
+        }
+      } catch {
+        setValidationResult("failed");
+      } finally {
+        setValidating(false);
+      }
       await onSave({
         name: formData.name,
         apiKey: formData.apiKey,
@@ -263,9 +280,16 @@ function AddApiKeyModal({ isOpen, provider, providerName, proxyPools, onSave, on
           </div>
         </div>
         {validationResult && (
-          <Badge variant={validationResult === "success" ? "success" : "error"}>
-            {validationResult === "success" ? "Valid" : "Invalid"}
-          </Badge>
+          <div className="flex flex-col gap-1">
+            <div>
+              <Badge variant={validationResult === "success" ? "success" : "error"}>
+                {validationResult === "success" ? "Valid" : "Invalid"}
+              </Badge>
+            </div>
+            {validationResult === "failed" && validationError && (
+              <span className="text-xs text-red-500 font-medium leading-relaxed">{validationError}</span>
+            )}
+          </div>
         )}
         <div>
           <label className="text-xs text-text-muted mb-1 block">Priority</label>
@@ -325,7 +349,11 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
     finally { setLoading(false); }
   }, [providerId]);
 
-  useEffect(() => { fetch_(); }, [fetch_]);
+  useEffect(() => {
+    queueMicrotask(() => {
+      fetch_();
+    });
+  }, [fetch_]);
 
   const saveStrategy = async (strategy, stickyLimit) => {
     try {
