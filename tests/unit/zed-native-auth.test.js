@@ -35,7 +35,12 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
+  // Best-effort: Windows keeps the SQLite handle open past the run, so a
+  // recursive remove can still throw EPERM even with retries. The temp dir is
+  // disposable and the OS reclaims it — failing the suite over cleanup is wrong.
+  try {
+    fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch { /* leave it to the OS */ }
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
 });
