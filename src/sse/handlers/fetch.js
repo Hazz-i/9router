@@ -15,6 +15,7 @@ import { updateProviderCredentials, checkAndRefreshToken } from "../services/tok
 import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo.js";
 import { getKeyAccessContext, enforceKeyAccessProvider } from "../services/keyAccess.js";
 import { assertPublicUrlResolved } from "@/shared/utils/ssrfGuard.js";
+import { saveRequestUsage } from "@/lib/usageDb.js";
 
 /**
  * Handle web fetch (URL extraction) request for the SSE/Next.js server.
@@ -153,6 +154,14 @@ async function handleSingleProviderFetch(body, providerInput, request, apiKey, s
       log
     });
     if (result.success) {
+      saveRequestUsage({
+        provider: providerId,
+        model: providerId,
+        apiKey,
+        endpoint: "/v1/web/fetch",
+        tokens: { prompt_tokens: (targetUrl || "").length, completion_tokens: 0 },
+        status: "success",
+      }).catch(() => {});
       return new Response(JSON.stringify(result.data), {
         headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
       });
@@ -212,6 +221,15 @@ async function handleSingleProviderFetch(body, providerInput, request, apiKey, s
 
     if (result.success) {
       await clearAccountError(credentials.connectionId, credentials, fetchLockKey);
+      saveRequestUsage({
+        provider: providerId,
+        model: providerId,
+        connectionId: credentials.connectionId,
+        apiKey,
+        endpoint: "/v1/web/fetch",
+        tokens: { prompt_tokens: (targetUrl || "").length, completion_tokens: 0 },
+        status: "success",
+      }).catch(() => {});
       return new Response(JSON.stringify(result.data), {
         headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
       });

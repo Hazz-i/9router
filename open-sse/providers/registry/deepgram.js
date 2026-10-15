@@ -23,11 +23,12 @@ export default {
     baseUrl: "https://api.deepgram.com/v1/listen",
   },
   models: [
-    { id: "nova-3", name: "Nova 3", params: ["language"], kind: "stt" },
-    { id: "nova-2", name: "Nova 2", params: ["language"], kind: "stt" },
-    { id: "whisper-large", name: "Whisper Large", params: ["language"], kind: "stt" },
-    { id: "nova", name: "Nova", kind: "stt" },
+    { id: "nova-3", name: "Nova 3", params: ["language"], kinds: ["stt", "liveCaption"] },
+    { id: "nova-2", name: "Nova 2", params: ["language"], kinds: ["stt", "liveCaption"] },
+    { id: "whisper-large", name: "Whisper Large", params: ["language"], kinds: ["stt", "liveCaption"] },
+    { id: "nova", name: "Nova", kinds: ["stt", "liveCaption"] },
   ],
-  serviceKinds: ["stt"],
+  serviceKinds: ["stt", "liveCaption"],
   sttConfig: { baseUrl: "https://api.deepgram.com/v1/listen", authType: "apikey", authHeader: "token", format: "deepgram" },
+  liveCaptionConfig: { wsUrl: "wss://api.deepgram.com/v1/listen", authType: "apikey", authHeader: "token", format: "deepgram" },
 };

@@ -2,13 +2,23 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { FREE_PROVIDERS, AI_PROVIDERS } from "@/shared/constants/providers";
+import {
+  FREE_PROVIDERS,
+  AI_PROVIDERS,
+  hasMediaCapability,
+  isMediaUsageEntry,
+} from "@/shared/constants/providers";
 
 // Keep providers without serviceKinds (default LLM) or with "llm" in serviceKinds
 function isLLMProvider(id) {
   const p = AI_PROVIDERS[id];
   if (!p?.serviceKinds) return true;
   return p.serviceKinds.includes("llm");
+}
+
+function isMediaProviderNode(id) {
+  if (id === "opencode" || id === "opencode-zen" || id === "opencode-go") return false;
+  return hasMediaCapability(id);
 }
 import Badge from "./Badge";
 import Card from "./Card";
@@ -72,9 +82,15 @@ function RecentRequests({ requests = [] }) {
                     </td>
                     <td className="py-1.5 font-mono truncate max-w-[120px]" title={r.model}>{r.model}</td>
                     <td className="py-1.5 text-right whitespace-nowrap">
-                      <span className="text-primary">{fmt(r.promptTokens)}↑</span>
-                      {" "}
-                      <span className="text-success">{fmt(r.completionTokens)}↓</span>
+                      {r.promptTokens === 0 && r.completionTokens === 0 ? (
+                        <span className="text-text-muted">{r.endpoint ? r.endpoint.replace(/^\/v1\//, "") : "—"}</span>
+                      ) : (
+                        <>
+                          <span className="text-primary">{fmt(r.promptTokens)}↑</span>
+                          {" "}
+                          <span className="text-success">{fmt(r.completionTokens)}↓</span>
+                        </>
+                      )}
                     </td>
                     <td className="py-1.5 text-right text-text-muted whitespace-nowrap"><TimeAgo timestamp={r.timestamp} /></td>
                   </tr>
@@ -203,7 +219,12 @@ const PERIODS = [
   { value: "all", label: "All" },
 ];
 
-export default function UsageStats({ period: periodProp, setPeriod: setPeriodProp, hidePeriodSelector = false } = {}) {
+export default function UsageStats({
+  period: periodProp,
+  setPeriod: setPeriodProp,
+  hidePeriodSelector = false,
+  filter = "all",
+} = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -235,10 +256,11 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         for (const node of (nodesData?.nodes || [])) {
           nodeNameMap[node.id] = node.name;
         }
+        const providerFilterFn = filter === "media" ? isMediaProviderNode : filter === "llm" ? isLLMProvider : () => true;
         const seen = new Set();
         const unique = (d?.connections || []).filter((c) => {
           if (c.isActive === false) return false;
-          if (!isLLMProvider(c.provider)) return false;
+          if (!providerFilterFn(c.provider)) return false;
           if (AI_PROVIDERS[c.provider]?.hidden) return false;
           if (seen.has(c.provider)) return false;
           seen.add(c.provider);
@@ -247,15 +269,17 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
           ...c,
           nodeName: nodeNameMap[c.provider] || null,
         }));
-        const noAuthProviders = Object.values(FREE_PROVIDERS)
-          .filter((p) => p.noAuth && !p.hidden && !seen.has(p.id) && isLLMProvider(p.id))
-          .map((p) => ({ provider: p.id, name: p.name }));
+        const noAuthProviders = filter === "media"
+          ? []
+          : Object.values(FREE_PROVIDERS)
+              .filter((p) => p.noAuth && !p.hidden && !seen.has(p.id) && providerFilterFn(p.id))
+              .map((p) => ({ provider: p.id, name: p.name }));
         setProviders([...unique, ...noAuthProviders]);
       })
       .catch(() => {});
-  }, []);
+  }, [filter]);
 
-  // Fetch filtered stats via REST when period changes
+  // Fetch filtered stats via REST when period or filter changes
   useEffect(() => {
     // First load: show full spinner; subsequent: show subtle fetching indicator
     if (isInitialLoad.current) {
@@ -265,7 +289,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       setFetching(true);
     }
 
-    fetch(`/api/usage/stats?period=${period}`)
+    fetch(`/api/usage/stats?period=${period}&type=${filter}`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (data) {
@@ -278,7 +302,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         setLoading(false);
         setFetching(false);
       });
-  }, [period]);
+  }, [period, filter]);
 
   // SSE connection - real-time updates for activeRequests + recentRequests only
   useEffect(() => {
@@ -287,13 +311,23 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
+        const filteredActive = (data.activeRequests || []).filter((r) => {
+          if (filter === "media") return isMediaUsageEntry(r);
+          if (filter === "llm") return !isMediaUsageEntry(r);
+          return true;
+        });
+        const filteredRecent = (data.recentRequests || []).filter((r) => {
+          if (filter === "media") return isMediaUsageEntry(r);
+          if (filter === "llm") return !isMediaUsageEntry(r);
+          return true;
+        });
         // Always merge only real-time fields, never overwrite full stats from REST
         setStats((prev) => {
           if (!prev) return prev;
           return {
             ...prev,
-            activeRequests: data.activeRequests,
-            recentRequests: data.recentRequests,
+            activeRequests: filteredActive,
+            recentRequests: filteredRecent,
             errorProvider: data.errorProvider,
             pending: data.pending,
           };
@@ -307,7 +341,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
     es.onerror = () => setLoading(false);
 
     return () => es.close();
-  }, []);
+  }, [filter]);
 
   const toggleSort = useCallback((tableType, field) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -329,8 +363,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         return {
           columns: MODEL_COLUMNS,
           groupedData: groupDataByKey(sortData(stats.byModel, pendingMap, sortBy, sortOrder), "rawModel"),
-          storageKey: "usage-stats:expanded-models",
-          emptyMessage: "No usage recorded yet.",
+          storageKey: `usage-stats:${filter}:expanded-models`,
+          emptyMessage: filter === "media" ? "No media model usage recorded yet." : "No usage recorded yet.",
           renderSummaryCells: (group) => (
             <>
               <td className="px-6 py-3 text-text-muted">—</td>
@@ -362,8 +396,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         return {
           columns: ACCOUNT_COLUMNS,
           groupedData: groupDataByKey(sortData(stats.byAccount, pendingMap, sortBy, sortOrder), "accountName"),
-          storageKey: "usage-stats:expanded-accounts",
-          emptyMessage: "No account-specific usage recorded yet.",
+          storageKey: `usage-stats:${filter}:expanded-accounts`,
+          emptyMessage: filter === "media" ? "No media account usage recorded yet." : "No account-specific usage recorded yet.",
           renderSummaryCells: (group) => (
             <>
               <td className="px-6 py-3 text-text-muted">—</td>
@@ -387,8 +421,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         return {
           columns: API_KEY_COLUMNS,
           groupedData: groupDataByKey(sortData(stats.byApiKey, {}, sortBy, sortOrder), "keyName"),
-          storageKey: "usage-stats:expanded-apikeys",
-          emptyMessage: "No API key usage recorded yet.",
+          storageKey: `usage-stats:${filter}:expanded-apikeys`,
+          emptyMessage: filter === "media" ? "No media API key usage recorded yet." : "No API key usage recorded yet.",
           renderSummaryCells: (group) => (
             <>
               <td className="px-6 py-3 text-text-muted">—</td>
@@ -413,8 +447,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         return {
           columns: ENDPOINT_COLUMNS,
           groupedData: groupDataByKey(sortData(stats.byEndpoint, {}, sortBy, sortOrder), "endpoint"),
-          storageKey: "usage-stats:expanded-endpoints",
-          emptyMessage: "No endpoint usage recorded yet.",
+          storageKey: `usage-stats:${filter}:expanded-endpoints`,
+          emptyMessage: filter === "media" ? "No media endpoint usage recorded yet." : "No endpoint usage recorded yet.",
           renderSummaryCells: (group) => (
             <>
               <td className="px-6 py-3 text-text-muted">—</td>
@@ -435,7 +469,64 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         };
       }
     }
-  }, [stats, tableView, sortBy, sortOrder]);
+  }, [stats, tableView, sortBy, sortOrder, filter]);
+
+  // Derive provider nodes for ProviderTopology:
+  // - In Media Overview (filter === "media"): shows media providers with activity in stats
+  //   (stats.byProvider, recentRequests, activeRequests) or connected media providers.
+  //   Free LLMs like OpenCode are strictly excluded. If none, topology is empty.
+  // - In Overview (filter === "llm"): shows connected LLMs + free chat providers (OpenCode, etc.).
+  const topologyProviders = useMemo(() => {
+    const seen = new Set();
+    const result = [];
+
+    // Base providers (from connections; when filter !== "media", includes noAuth free providers)
+    for (const p of providers) {
+      const pid = p.provider?.toLowerCase();
+      if (pid && !seen.has(pid)) {
+        seen.add(pid);
+        result.push(p);
+      }
+    }
+
+    if (filter === "media") {
+      const statsProviders = [
+        ...Object.keys(stats?.byProvider || {}),
+        ...((stats?.recentRequests || []).map((r) => r.provider)),
+        ...((stats?.activeRequests || []).map((r) => r.provider)),
+      ];
+      for (const rawId of statsProviders) {
+        if (!rawId) continue;
+        const pid = rawId.toLowerCase();
+        if (!seen.has(pid) && isMediaProviderNode(rawId)) {
+          seen.add(pid);
+          result.push({
+            provider: rawId,
+            name: AI_PROVIDERS[rawId]?.name || rawId,
+          });
+        }
+      }
+    } else if (filter === "llm") {
+      const statsProviders = [
+        ...Object.keys(stats?.byProvider || {}),
+        ...((stats?.recentRequests || []).map((r) => r.provider)),
+        ...((stats?.activeRequests || []).map((r) => r.provider)),
+      ];
+      for (const rawId of statsProviders) {
+        if (!rawId) continue;
+        const pid = rawId.toLowerCase();
+        if (!seen.has(pid) && isLLMProvider(rawId)) {
+          seen.add(pid);
+          result.push({
+            provider: rawId,
+            name: AI_PROVIDERS[rawId]?.name || rawId,
+          });
+        }
+      }
+    }
+
+    return result;
+  }, [providers, stats, filter]);
 
   if (!stats && !loading) return <div className="text-text-muted">Failed to load usage statistics.</div>;
 
@@ -475,7 +566,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       {loading ? spinner : (
         <div className="grid min-w-0 grid-cols-1 items-stretch gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
           <ProviderTopology
-            providers={providers}
+            providers={topologyProviders}
             activeRequests={stats.activeRequests || []}
             lastProvider={stats.recentRequests?.[0]?.provider || ""}
             errorProvider={stats.errorProvider || ""}
@@ -485,7 +576,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       )}
 
       {/* Token / Cost chart - sync period */}
-      {loading ? spinner : <UsageChart period={period} />}
+      {loading ? spinner : <UsageChart period={period} type={filter} />}
 
       {/* Provider and model breakdown charts */}
       {!loading && (stats.byProvider || stats.byModel) && (

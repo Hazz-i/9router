@@ -30,7 +30,7 @@ function UsageContent() {
   const [period, setPeriod] = useState("today");
 
   const tabFromUrl = searchParams.get("tab");
-  const activeTab = tabFromUrl && ["overview", "logs", "details"].includes(tabFromUrl)
+  const activeTab = tabFromUrl && ["overview", "media-overview", "logs", "details"].includes(tabFromUrl)
     ? tabFromUrl
     : "overview";
 
@@ -48,13 +48,14 @@ function UsageContent() {
         <SegmentedControl
           options={[
             { value: "overview", label: "Overview" },
+            { value: "media-overview", label: "Media Overview" },
             { value: "details", label: "Details" },
           ]}
           value={activeTab}
           onChange={handleTabChange}
           className="w-full sm:w-auto"
         />
-        {activeTab === "overview" && (
+        {(activeTab === "overview" || activeTab === "media-overview") && (
           <SegmentedControl
             options={PERIODS}
             value={period}
@@ -65,9 +66,15 @@ function UsageContent() {
         )}
       </div>
 
-      {activeTab === "overview" && (
+      {(activeTab === "overview" || activeTab === "media-overview") && (
         <Suspense fallback={<CardSkeleton />}>
-          <UsageStats period={period} setPeriod={setPeriod} hidePeriodSelector />
+          <UsageStats
+            key={activeTab}
+            period={period}
+            setPeriod={setPeriod}
+            hidePeriodSelector
+            filter={activeTab === "media-overview" ? "media" : "llm"}
+          />
         </Suspense>
       )}
       {activeTab === "logs" && <RequestLogger />}

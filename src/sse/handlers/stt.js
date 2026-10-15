@@ -10,6 +10,7 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import * as log from "../utils/logger.js";
+import { saveRequestUsage } from "@/lib/usageDb.js";
 
 // Providers requiring credentials for STT
 const CREDENTIALED_PROVIDERS = new Set(
@@ -47,8 +48,8 @@ export async function handleStt(request) {
   log.request("POST", `/v1/audio/transcriptions | ${modelStr}`);
 
   const settings = await getSettings();
+  const apiKey = extractApiKey(request);
   if (settings.requireApiKey) {
-    const apiKey = extractApiKey(request);
     if (!apiKey) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
     const valid = await isValidApiKey(apiKey);
     if (!valid) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
@@ -73,7 +74,17 @@ export async function handleStt(request) {
   // noAuth providers
   if (!CREDENTIALED_PROVIDERS.has(provider)) {
     const result = await handleSttCore({ provider, model, formData, sttConfig: AI_PROVIDERS[provider]?.sttConfig, transport: modelTransport });
-    if (result.success) return result.response;
+    if (result.success) {
+      saveRequestUsage({
+        provider,
+        model,
+        apiKey,
+        endpoint: "/v1/audio/transcriptions",
+        tokens: result.usage || { prompt_tokens: 0, completion_tokens: 0 },
+        status: "success",
+      }).catch(() => {});
+      return result.response;
+    }
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "STT failed");
   }
 
@@ -99,7 +110,18 @@ export async function handleStt(request) {
 
     const result = await handleSttCore({ provider, model, formData, credentials, sttConfig: AI_PROVIDERS[provider]?.sttConfig, transport: modelTransport });
 
-    if (result.success) return result.response;
+    if (result.success) {
+      saveRequestUsage({
+        provider,
+        model,
+        connectionId: credentials.connectionId,
+        apiKey,
+        endpoint: "/v1/audio/transcriptions",
+        tokens: result.usage || { prompt_tokens: 0, completion_tokens: 0 },
+        status: "success",
+      }).catch(() => {});
+      return result.response;
+    }
 
     const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model);
     if (shouldFallback) {

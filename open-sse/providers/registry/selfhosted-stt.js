@@ -34,12 +34,18 @@ export default {
     },
   },
   models: [
-    { id: "whisper-1", name: "Whisper (self-hosted)", params: ["language", "response_format", "temperature", "prompt"], kind: "stt" },
+    { id: "whisper-1", name: "Whisper (self-hosted)", params: ["language", "response_format", "temperature", "prompt"], kinds: ["stt", "liveCaption"] },
   ],
-  serviceKinds: ["stt"],
+  serviceKinds: ["stt", "liveCaption"],
   sttConfig: {
     // Overridden per connection by providerSpecificData.baseUrl; this default
     // only makes the provider usable out of the box on a same-host deployment.
+    baseUrl: "http://localhost:8080/v1/audio/transcriptions",
+    authType: "apikey",
+    authHeader: "bearer",
+    format: "openai",
+  },
+  liveCaptionConfig: {
     baseUrl: "http://localhost:8080/v1/audio/transcriptions",
     authType: "apikey",
     authHeader: "bearer",

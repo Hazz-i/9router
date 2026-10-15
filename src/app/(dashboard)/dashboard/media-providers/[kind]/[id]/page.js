@@ -13,6 +13,8 @@ import { EmbeddingExampleCard } from "./components/EmbeddingExampleCard";
 import { TtsExampleCard } from "./components/TtsExampleCard";
 import { GenericExampleCard } from "./components/GenericExampleCard";
 import { SttExampleCard } from "./components/SttExampleCard";
+import { LiveCaptionExampleCard } from "./components/LiveCaptionExampleCard";
+import { RealtimeVoiceExampleCard } from "./components/RealtimeVoiceExampleCard";
 
 // MediaProviderDetailPage
 export default function MediaProviderDetailPage() {
@@ -171,13 +173,15 @@ export default function MediaProviderDetailPage() {
         />
       )}
 
-      {/* Provider Info — config-driven, supports searchConfig, fetchConfig, ttsConfig, embeddingConfig, systemoneConfig, searchViaChat */}
-      {!isCustom && (provider.searchConfig || provider.fetchConfig || provider.ttsConfig || provider.sttConfig || provider.embeddingConfig || provider.systemoneConfig || provider.searchViaChat) && (
+      {/* Provider Info — config-driven, supports searchConfig, fetchConfig, ttsConfig, sttConfig, liveCaptionConfig, realtimeConfig, embeddingConfig, systemoneConfig, searchViaChat */}
+      {!isCustom && (provider.searchConfig || provider.fetchConfig || provider.ttsConfig || provider.sttConfig || provider.liveCaptionConfig || provider.realtimeConfig || provider.embeddingConfig || provider.systemoneConfig || provider.searchViaChat) && (
         <ProviderInfoCard
           config={
             kind === "webFetch" ? provider.fetchConfig
               : kind === "tts" ? provider.ttsConfig
               : kind === "stt" ? provider.sttConfig
+              : kind === "liveCaption" ? provider.liveCaptionConfig
+              : kind === "realtime" ? provider.realtimeConfig
               : kind === "embedding" ? provider.embeddingConfig
               : kind === "systemone" ? provider.systemoneConfig
               : provider.searchConfig || { mode: "chat-completions", defaultModel: provider.searchViaChat?.defaultModel, pricingUrl: provider.searchViaChat?.pricingUrl, freeTier: provider.searchViaChat?.freeTier }
@@ -193,6 +197,8 @@ export default function MediaProviderDetailPage() {
       )}
       {kind === "tts" && <TtsExampleCard providerId={id} />}
       {kind === "stt" && !isCustom && <SttExampleCard providerId={id} />}
+      {kind === "liveCaption" && !isCustom && <LiveCaptionExampleCard providerId={id} />}
+      {kind === "realtime" && !isCustom && <RealtimeVoiceExampleCard providerId={id} />}
       {!isCustom && KIND_EXAMPLE_CONFIG[kind] && <GenericExampleCard providerId={id} kind={kind} />}
 
       {isCustom && (

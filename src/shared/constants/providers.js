@@ -3,7 +3,7 @@ import REGISTRY from "open-sse/providers/registry/index.js";
 import { RISK_NOTICE } from "@/shared/constants/providersDisplay.js";
 
 const MEDIA_ENTRY_KEYS = [
-  "serviceKinds", "ttsConfig", "sttConfig", "embeddingConfig",
+  "serviceKinds", "ttsConfig", "sttConfig", "liveCaptionConfig", "realtimeConfig", "embeddingConfig",
   "imageConfig", "imageToTextConfig", "videoConfig", "musicConfig",
   "searchViaChat", "searchConfig", "fetchConfig", "credentialFallback", "systemoneConfig",
   "modelsFetcher", "mediaPriority", "hiddenKinds",
@@ -77,6 +77,8 @@ export const MEDIA_PROVIDER_KINDS = [
   { id: "imageToText", label: "Image to Text",  icon: "image_search",      endpoint: { method: "POST", path: "/v1/images/understanding" } },
   { id: "tts",         label: "Text To Speech", icon: "record_voice_over", endpoint: { method: "POST", path: "/v1/audio/speech" } },
   { id: "stt",         label: "Speech To Text", icon: "mic",               endpoint: { method: "POST", path: "/v1/audio/transcriptions" } },
+  { id: "liveCaption", label: "Live Caption",   icon: "closed_caption",    endpoint: { method: "WS",   path: "/v1/audio/live-transcriptions" } },
+  { id: "realtime",    label: "Realtime Voice", icon: "record_voice_over", endpoint: { method: "WS",   path: "/v1/realtime" }, isNew: true },
   { id: "webSearch",   label: "Web Search",     icon: "travel_explore",    endpoint: { method: "POST", path: "/v1/search" } },
   { id: "webFetch",    label: "Web Fetch",      icon: "language",          endpoint: { method: "POST", path: "/v1/web/fetch" } },
   { id: "video",       label: "Video",          icon: "movie",             endpoint: { method: "POST", path: "/v1/videos/generations" } },
@@ -102,6 +104,74 @@ export function isCustomEmbeddingProvider(providerId) {
 
 // All providers (combined)
 export const AI_PROVIDERS = { ...FREE_PROVIDERS, ...FREE_TIER_PROVIDERS, ...OAUTH_PROVIDERS, ...APIKEY_PROVIDERS, ...WEB_COOKIE_PROVIDERS };
+
+export const MEDIA_ENDPOINT_PREFIXES = [
+  "/v1/audio/",
+  "/v1/realtime",
+  "/v1/images/",
+  "/v1/videos/",
+  "/v1/web/",
+  "/v1/embeddings",
+  "/v1/search",
+  "/v1/systemone",
+];
+
+export const LLM_ENDPOINT_PREFIXES = [
+  "/v1/chat/",
+  "/v1/messages",
+  "/v1/completions",
+  "/v1/responses",
+];
+
+export function isMediaEndpoint(endpoint) {
+  if (!endpoint || typeof endpoint !== "string") return false;
+  return MEDIA_ENDPOINT_PREFIXES.some((prefix) => endpoint.startsWith(prefix));
+}
+
+export const MEDIA_SERVICE_KINDS = new Set([
+  "image", "tts", "embedding", "imageToText", "webSearch", "stt", "liveCaption", "realtime", "webFetch", "video", "music"
+]);
+
+export function isMediaProvider(providerId) {
+  if (!providerId || typeof providerId !== "string") return false;
+  if (providerId.startsWith("custom-embedding-")) return true;
+  const p = AI_PROVIDERS[providerId];
+  if (!p) return false;
+  if (Array.isArray(p.serviceKinds) && !p.serviceKinds.includes("llm") && p.serviceKinds.some((k) => MEDIA_SERVICE_KINDS.has(k))) return true;
+  return false;
+}
+
+export function hasMediaCapability(providerId) {
+  if (!providerId || typeof providerId !== "string") return false;
+  if (providerId.startsWith("custom-embedding-")) return true;
+  const p = AI_PROVIDERS[providerId];
+  if (!p) return false;
+  return Array.isArray(p.serviceKinds) && p.serviceKinds.some((k) => MEDIA_SERVICE_KINDS.has(k));
+}
+
+
+export function isMediaUsageEntry(entry) {
+  if (!entry) return false;
+  const ep = entry.endpoint;
+  if (ep && typeof ep === "string") {
+    if (isMediaEndpoint(ep)) return true;
+    if (LLM_ENDPOINT_PREFIXES.some((prefix) => ep.startsWith(prefix))) return false;
+  }
+  const prov = entry.provider;
+  if (prov && isMediaProvider(prov)) return true;
+  const model = (entry.model || entry.rawModel || "").toLowerCase();
+  if (
+    model.includes("embedding") ||
+    model.startsWith("tts-") ||
+    model.startsWith("whisper") ||
+    model.startsWith("dall-e") ||
+    model.includes("live-caption") ||
+    model.includes("speech")
+  ) {
+    return true;
+  }
+  return false;
+}
 
 // Auth methods
 export const AUTH_METHODS = {

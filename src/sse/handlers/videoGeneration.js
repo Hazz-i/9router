@@ -13,6 +13,7 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import * as log from "../utils/logger.js";
+import { saveRequestUsage } from "@/lib/usageDb.js";
 
 // Video generation is xAI-only today; requests without a provider prefix
 // (bare model id, or multipart bodies we deliberately don't parse) land here.
@@ -177,6 +178,16 @@ export async function handleVideoCreate(request, action) {
 
     if (result.success) {
       await clearAccountError(credentials.connectionId, credentials, model);
+      const apiKey = extractApiKey(request);
+      saveRequestUsage({
+        provider,
+        model,
+        connectionId: credentials.connectionId,
+        apiKey,
+        endpoint: "/v1/videos/generations",
+        tokens: result.usage || { prompt_tokens: 0, completion_tokens: 0 },
+        status: "success",
+      }).catch(() => {});
       log.info("VIDEO", `${provider.toUpperCase()} | ${action} accepted (connection ${credentials.connectionId})`);
       return withConnectionHeader(result.response, credentials.connectionId);
     }

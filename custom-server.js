@@ -46,6 +46,60 @@ function startBackgroundTokenRefreshFromCustomServer() {
     });
 }
 
+let liveWsServer = null;
+let handleLiveTranscriptionConnection = null;
+
+function getLiveWsServer() {
+  if (!liveWsServer) {
+    const { WebSocketServer } = require("ws");
+    liveWsServer = new WebSocketServer({ noServer: true });
+    liveWsServer.on("connection", (ws, req) => {
+      if (handleLiveTranscriptionConnection) {
+        handleLiveTranscriptionConnection(ws, req);
+      } else {
+        const modPath = path.join(__dirname, "src", "sse", "handlers", "liveCaptionWs.js");
+        import(pathToFileURL(modPath).href)
+          .then((m) => {
+            handleLiveTranscriptionConnection = m.handleLiveTranscriptionConnection;
+            handleLiveTranscriptionConnection(ws, req);
+          })
+          .catch((e) => {
+            console.error("[LiveCaptionWS] failed to load handler:", e);
+            ws.close(1011, "Internal server error");
+          });
+      }
+    });
+  }
+  return liveWsServer;
+}
+
+let realtimeWsServer = null;
+let handleRealtimeVoiceConnection = null;
+
+function getRealtimeWsServer() {
+  if (!realtimeWsServer) {
+    const { WebSocketServer } = require("ws");
+    realtimeWsServer = new WebSocketServer({ noServer: true });
+    realtimeWsServer.on("connection", (ws, req) => {
+      if (handleRealtimeVoiceConnection) {
+        handleRealtimeVoiceConnection(ws, req);
+      } else {
+        const modPath = path.join(__dirname, "src", "sse", "handlers", "realtimeVoiceWs.js");
+        import(pathToFileURL(modPath).href)
+          .then((m) => {
+            handleRealtimeVoiceConnection = m.handleRealtimeVoiceConnection;
+            handleRealtimeVoiceConnection(ws, req);
+          })
+          .catch((e) => {
+            console.error("[RealtimeVoiceWS] failed to load handler:", e);
+            ws.close(1011, "Internal server error");
+          });
+      }
+    });
+  }
+  return realtimeWsServer;
+}
+
 // Wrap Next standalone HTTP server: derive client IP from the TCP socket
 // (unspoofable) and strip client-supplied forwarding headers so downstream
 // rate-limiting keys on the real peer address instead of attacker-controlled XFF.
@@ -77,10 +131,32 @@ http.createServer = (...args) => {
     startBackgroundTokenRefreshFromCustomServer();
   });
   const origEmit = server.emit;
-  // JBR 25 sends h2c upgrades that the HTTP/1.1 server would otherwise close.
+  // Handle WebSockets for live captions and h2c upgrades from JBR 25
   server.emit = function (event, ...eventArgs) {
     const [req, socket, head] = eventArgs;
-    if (event !== "upgrade" || String(req.headers.upgrade || "").toLowerCase() !== "h2c") {
+    if (event === "upgrade") {
+      const upgradeHeader = String(req.headers.upgrade || "").toLowerCase();
+      if (upgradeHeader === "websocket") {
+        const pathname = (req.url || "").split("?")[0];
+        if (pathname === "/v1/audio/live-transcriptions" || pathname === "/api/v1/audio/live-transcriptions") {
+          const wss = getLiveWsServer();
+          wss.handleUpgrade(req, socket, head, (ws) => {
+            wss.emit("connection", ws, req);
+          });
+          return true;
+        }
+        if (pathname === "/v1/realtime" || pathname === "/api/v1/realtime") {
+          const wss = getRealtimeWsServer();
+          wss.handleUpgrade(req, socket, head, (ws) => {
+            wss.emit("connection", ws, req);
+          });
+          return true;
+        }
+      }
+      if (upgradeHeader !== "h2c") {
+        return origEmit.call(this, event, ...eventArgs);
+      }
+    } else {
       return origEmit.call(this, event, ...eventArgs);
     }
 
@@ -133,7 +209,9 @@ if (require.main === module) {
     // Repo checkout has no standalone build next to us. `next start` builds its HTTP
     // server in-process, so the wrapper above still sanitizes every request.
     const nextBin = require.resolve("next/dist/bin/next");
-    process.argv = [process.argv[0], nextBin, "start", ...process.argv.slice(2)];
+    const cmd = process.argv[2] === "dev" ? "dev" : "start";
+    const extraArgs = process.argv[2] === "dev" ? process.argv.slice(3) : process.argv.slice(2);
+    process.argv = [process.argv[0], nextBin, cmd, ...extraArgs];
     require(nextBin);
   }
 }

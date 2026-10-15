@@ -14,6 +14,7 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo.js";
 import { getKeyAccessContext, enforceKeyAccessProvider } from "../services/keyAccess.js";
+import { saveRequestUsage } from "@/lib/usageDb.js";
 
 /**
  * Handle web search request for the SSE/Next.js server.
@@ -145,7 +146,17 @@ async function handleSingleProviderSearch(body, providerInput, request, apiKey, 
       credentials: null,
       log
     });
-    if (result.success) return result.response;
+    if (result.success) {
+      saveRequestUsage({
+        provider: providerId,
+        model: providerId,
+        apiKey,
+        endpoint: "/v1/search",
+        tokens: { prompt_tokens: (query || "").length, completion_tokens: 0 },
+        status: "success",
+      }).catch(() => {});
+      return result.response;
+    }
     return result.response;
   }
 
@@ -220,7 +231,18 @@ async function handleSingleProviderSearch(body, providerInput, request, apiKey, 
       }
     });
 
-    if (result.success) return result.response;
+    if (result.success) {
+      saveRequestUsage({
+        provider: providerId,
+        model: providerId,
+        connectionId: credentials.connectionId,
+        apiKey,
+        endpoint: "/v1/search",
+        tokens: { prompt_tokens: (query || "").length, completion_tokens: 0 },
+        status: "success",
+      }).catch(() => {});
+      return result.response;
+    }
 
     const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, credentialProviderId, searchLockKey);
 
