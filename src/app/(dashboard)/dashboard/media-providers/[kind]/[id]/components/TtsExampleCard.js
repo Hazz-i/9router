@@ -44,7 +44,7 @@ export function TtsExampleCard({ providerId }) {
   const [style, setStyle]               = useState(""); // style/voice instructions (e.g. MiMo voicedesign)
   const [apiKey, setApiKey]             = useState("");
   const [useTunnel, setUseTunnel]       = useState(false);
-  const [localEndpoint, setLocalEndpoint]   = useState("");
+  const [localEndpoint, setLocalEndpoint]   = useState(() => (typeof window !== "undefined" ? window.location.origin : ""));
   const [tunnelEndpoint, setTunnelEndpoint] = useState("");
   const [responseFormat, setResponseFormat] = useState("mp3"); // mp3 | json
   const [audioUrl, setAudioUrl]         = useState("");
@@ -67,7 +67,6 @@ export function TtsExampleCard({ providerId }) {
   const [connectionCount, setConnectionCount] = useState(0);
 
   useEffect(() => {
-    setLocalEndpoint(window.location.origin);
     fetch("/api/keys")
       .then((r) => r.json())
       .then((d) => { setApiKey((d.keys || []).find((k) => k.isActive !== false)?.key || ""); })
@@ -83,28 +82,30 @@ export function TtsExampleCard({ providerId }) {
 
     // Pre-select default voice based on provider config
     if (config.voiceSource === "hardcoded") {
-      const defaultModel = config.hasModelSelector && config.modelKey
-        ? (getModelsByProviderId(config.modelKey)?.[0]?.id || "")
-        : "";
-      // Use per-model voices if available, else flat list
-      const voices = (config.voicesPerModel && defaultModel)
-        ? (getTtsVoicesForModel(providerId, defaultModel) || [])
-        : getModelsByProviderId(config.voiceKey || providerId).filter((m) => getModelKind(m) === "tts");
-      if (voices.length) {
-        if (config.hasBrowseButton) {
-          // Google TTS: pre-select "en" (English) as default, show as single voice chip
-          const defaultVoice = voices.find((v) => v.id === "en") || voices[0];
-          setSelectedLang(defaultVoice.id);
-          setSelectedVoice(defaultVoice.id);
-          setSelectedVoiceName(defaultVoice.name);
-          setCountryVoices([{ id: defaultVoice.id, name: defaultVoice.name }]);
-        } else {
-          // OpenAI/OpenRouter: set voice chips directly (no language picker)
-          setCountryVoices(voices);
-          setSelectedVoice(voices[0].id);
-          setSelectedVoiceName(voices[0].name || voices[0].id);
+      queueMicrotask(() => {
+        const defaultModel = config.hasModelSelector && config.modelKey
+          ? (getModelsByProviderId(config.modelKey)?.[0]?.id || "")
+          : "";
+        // Use per-model voices if available, else flat list
+        const voices = (config.voicesPerModel && defaultModel)
+          ? (getTtsVoicesForModel(providerId, defaultModel) || [])
+          : getModelsByProviderId(config.voiceKey || providerId).filter((m) => getModelKind(m) === "tts");
+        if (voices.length) {
+          if (config.hasBrowseButton) {
+            // Google TTS: pre-select "en" (English) as default, show as single voice chip
+            const defaultVoice = voices.find((v) => v.id === "en") || voices[0];
+            setSelectedLang(defaultVoice.id);
+            setSelectedVoice(defaultVoice.id);
+            setSelectedVoiceName(defaultVoice.name);
+            setCountryVoices([{ id: defaultVoice.id, name: defaultVoice.name }]);
+          } else {
+            // OpenAI/OpenRouter: set voice chips directly (no language picker)
+            setCountryVoices(voices);
+            setSelectedVoice(voices[0].id);
+            setSelectedVoiceName(voices[0].name || voices[0].id);
+          }
         }
-      }
+      });
     }
     // api-language (edge-tts, local-device, elevenlabs): NO default load, wait for user to pick language
     // config (nvidia, hyperbolic, deepgram, huggingface, cartesia, playht, coqui, tortoise, inworld, qwen):
@@ -114,16 +115,18 @@ export function TtsExampleCard({ providerId }) {
   // Update voices when model changes (voicesPerModel providers)
   useEffect(() => {
     if (!config.voicesPerModel || !selectedModel) return;
-    const voices = getTtsVoicesForModel(providerId, selectedModel) || [];
-    setCountryVoices(voices);
-    if (voices.length) {
-      setSelectedVoice(voices[0].id);
-      setSelectedVoiceName(voices[0].name || voices[0].id);
-    } else {
-      // Model has no preset voices (voicedesign/voiceclone) — drop stale voice
-      setSelectedVoice("");
-      setSelectedVoiceName("");
-    }
+    queueMicrotask(() => {
+      const voices = getTtsVoicesForModel(providerId, selectedModel) || [];
+      setCountryVoices(voices);
+      if (voices.length) {
+        setSelectedVoice(voices[0].id);
+        setSelectedVoiceName(voices[0].name || voices[0].id);
+      } else {
+        // Model has no preset voices (voicedesign/voiceclone) — drop stale voice
+        setSelectedVoice("");
+        setSelectedVoiceName("");
+      }
+    });
   }, [selectedModel]);
 
   // Open modal — load language list
@@ -173,6 +176,34 @@ export function TtsExampleCard({ providerId }) {
       setSelectedVoice(voices[0].id);
       setSelectedVoiceName(voices[0].name);
       if (config.hasVoiceIdInput) setVoiceId(voices[0].id);
+    }
+
+    const sampleGreetings = {
+      id: "Halo, ini adalah pengujian suara text-to-speech.",
+      en: "Hello, this is a text to speech test.",
+      ja: "こんにちは、これはテキスト読み上げのテストです。",
+      es: "Hola, esta es una prueba de texto a voz.",
+      fr: "Bonjour, ceci est un test de synthèse vocale.",
+      de: "Hallo, dies ist ein Text-to-Speech-Test.",
+      zh: "你好，这是一次语音合成测试。",
+      el: "Γεια σας, αυτή είναι μια δοκιμή κειμένου σε ομιλία.",
+      ar: "مرحبا، هذا اختبار لتحويل النص إلى كلام.",
+      ko: "안녕하세요, 텍스트 음성 변환 테스트입니다.",
+      it: "Ciao, questo è un test di sintesi vocale.",
+      pt: "Olá, este é um teste de conversão de texto em fala.",
+      ru: "Здравствуйте, это тест преобразования текста в речь.",
+      hi: "नमस्ते, यह एक टेक्स्ट-टू-स्पीच परीक्षण है।",
+      vi: "Xin chào, đây là bản thử nghiệm chuyển văn bản thành giọng nói.",
+      th: "สวัสดี นี่คือการทดสอบการอ่านออกเสียงข้อความ",
+      tr: "Merhaba, bu bir metinden sese dönüştürme testidir.",
+      nl: "Hallo, dit is een test voor tekst-naar-spraak.",
+      fil: "Halo, ito ay isang pagsubok sa text to speech.",
+      ms: "Hai, ini adalah ujian teks ke pertuturan.",
+    };
+    if (!input || input === "Hello, this is a text to speech test." || Object.values(sampleGreetings).includes(input)) {
+      if (sampleGreetings[lang.code]) {
+        setInput(sampleGreetings[lang.code]);
+      }
     }
   };
 
