@@ -154,6 +154,8 @@ export async function handleRealtimeVoiceConnection(clientWs, req) {
         systemInstruction: {
           parts: [{ text: activeInstructions }],
         },
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
       },
     };
     log.info("REALTIME_VOICE", `Sending setup to Gemini: model=${setupMsg.setup.model}, voice=${activeVoice}`);
@@ -369,12 +371,10 @@ export async function handleRealtimeVoiceConnection(clientWs, req) {
           upstreamWs.send(
             JSON.stringify({
               realtimeInput: {
-                mediaChunks: [
-                  {
-                    mimeType: "audio/pcm;rate=16000",
-                    data: data.toString("base64"),
-                  },
-                ],
+                audio: {
+                  mimeType: "audio/pcm;rate=16000",
+                  data: data.toString("base64"),
+                },
               },
             })
           );
@@ -419,12 +419,10 @@ export async function handleRealtimeVoiceConnection(clientWs, req) {
               upstreamWs.send(
                 JSON.stringify({
                   realtimeInput: {
-                    mediaChunks: [
-                      {
-                        mimeType: "audio/pcm;rate=16000",
-                        data: event.audio,
-                      },
-                    ],
+                    audio: {
+                      mimeType: "audio/pcm;rate=16000",
+                      data: event.audio,
+                    },
                   },
                 })
               );

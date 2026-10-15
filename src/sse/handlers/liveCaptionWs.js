@@ -511,6 +511,8 @@ async function setupGeminiLiveUpstream({ clientWs, credentials, model, language,
         systemInstruction: {
           parts: [{ text: language ? `Transcribe the spoken audio verbatim in language ${language}.` : "Transcribe the spoken audio verbatim." }],
         },
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
       },
     };
     geminiWs.send(JSON.stringify(setupFrame));
@@ -567,12 +569,10 @@ async function setupGeminiLiveUpstream({ clientWs, credentials, model, language,
         const base64Audio = Buffer.from(data).toString("base64");
         geminiWs.send(JSON.stringify({
           realtimeInput: {
-            mediaChunks: [
-              {
-                mimeType: "audio/pcm;rate=16000",
-                data: base64Audio,
-              },
-            ],
+            audio: {
+              mimeType: "audio/pcm;rate=16000",
+              data: base64Audio,
+            },
           },
         }));
       }
