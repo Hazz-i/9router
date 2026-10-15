@@ -52,11 +52,61 @@ async function getInternalHeaders() {
   const headers = { "Content-Type": "application/json" };
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
   headers["x-9r-cli-token"] = await getConsistentMachineId(CLI_TOKEN_SALT);
-  return headers;
+  return { headers, apiKey };
+}
+
+// Probes a local WS gateway (realtime voice / live caption). These kinds are
+// served over WebSocket, not the chat path — POSTing them to
+// /api/v1/chat/completions would probe the wrong transport entirely (e.g.
+// media-only providers fall back to OpenAI and 401). Success = the gateway's
+// first "session is live" frame; an error frame fails with its message.
+function probeLocalWs(url, okType, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const latencyMs = () => Date.now() - start;
+    let ws = null;
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (ws && ws.readyState !== 3) ws.close(); // 3 = CLOSED
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      finish({ ok: false, latencyMs: latencyMs(), error: `Timed out waiting for WS ${okType} after ${timeoutMs / 1000}s` });
+    }, timeoutMs);
+
+    try {
+      ws = new WebSocket(url);
+    } catch (err) {
+      finish({ ok: false, latencyMs: latencyMs(), error: String(err?.message || err).slice(0, 240) });
+      return;
+    }
+    ws.addEventListener("message", (ev) => {
+      let frame = null;
+      try { frame = JSON.parse(typeof ev.data === "string" ? ev.data : String(ev.data)); } catch {}
+      if (!frame) return;
+      if (frame.type === okType) {
+        finish({ ok: true, latencyMs: latencyMs(), error: null });
+      } else if (frame.type === "error") {
+        const detail = frame.error?.message || frame.error || frame.message;
+        finish({
+          ok: false,
+          latencyMs: latencyMs(),
+          error: detail ? String(detail).slice(0, 240) : `WS gateway returned an error before ${okType}`,
+        });
+      }
+    });
+    ws.addEventListener("error", () => finish({ ok: false, latencyMs: latencyMs(), error: "WebSocket connection failed" }));
+    ws.addEventListener("close", (ev) => {
+      finish({ ok: false, latencyMs: latencyMs(), error: `WebSocket closed (code ${ev.code}) before ${okType}` });
+    });
+  });
 }
 
 export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`) {
-  const headers = await getInternalHeaders();
+  const { headers, apiKey } = await getInternalHeaders();
   const start = Date.now();
 
   if (kind === "embedding") {
@@ -163,6 +213,20 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
       return { ok: false, latencyMs, status: res.status, error: "Provider returned no answers for this model" };
     }
     return { ok: true, latencyMs, error: null, status: res.status };
+  }
+
+  if (kind === "realtime" || kind === "liveCaption") {
+    const wsUrl = new URL(baseUrl.replace(/^http/, "ws"));
+    if (kind === "realtime") {
+      wsUrl.pathname = "/v1/realtime";
+      wsUrl.search = new URLSearchParams({ model, voice: "Puck" });
+    } else {
+      wsUrl.pathname = "/v1/audio/live-transcriptions";
+      wsUrl.search = new URLSearchParams({ model, language: "id", encoding: "linear16", sample_rate: "16000" });
+    }
+    if (apiKey) wsUrl.searchParams.set("apiKey", apiKey);
+    // Same gateways the features use; query-param key per extractTokenFromRequest.
+    return probeLocalWs(wsUrl.toString(), kind === "realtime" ? "session.created" : "ready");
   }
 
   const res = await fetch(`${baseUrl}/api/v1/chat/completions`, {
