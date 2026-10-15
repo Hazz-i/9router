@@ -51,6 +51,7 @@ source/*
 .cursor/*
 docs/*
 !docs/ARCHITECTURE.md
+!docs/superpowers/
 test/*
 open-sse/test/*
 RM.vn.md
@@ -86,6 +87,9 @@ graphify-out/*
 .codegraph/
 .PR/
 .next-analyze/*
+.hermes/
+.commandcode/
+.agents/
 
 # Kiro local workspace state
 .kiro/
