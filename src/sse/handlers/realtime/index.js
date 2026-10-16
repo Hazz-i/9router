@@ -10,12 +10,10 @@
 // ./openaiEvents.js builders and the ctx senders, so one adapter's failure
 // cannot spill into the others.
 import { createGeminiAdapter } from "./geminiAdapter.js";
-import { createElevenLabsAdapter } from "./elevenlabsAdapter.js";
 import { createDeepgramAdapter } from "./deepgramAdapter.js";
 
 export const REALTIME_ADAPTERS = {
   gemini: createGeminiAdapter,
-  elevenlabs: createElevenLabsAdapter,
   deepgram: createDeepgramAdapter,
 };
 

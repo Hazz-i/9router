@@ -17,10 +17,6 @@ const GEMINI_VOICES = [
 
 const REALTIME_PROVIDER_COPY = {
   gemini: { name: "Gemini Live", voices: GEMINI_VOICES },
-  elevenlabs: {
-    name: "ElevenLabs Agents",
-    note: "Realtime Voice Agent only (not TTS/STT) needs a ConvAI Agent ID in provider settings — without it the agent cannot be reached.",
-  },
   deepgram: { name: "Deepgram Voice Agent" },
 };
 

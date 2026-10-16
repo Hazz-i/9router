@@ -1,5 +1,5 @@
-// Translation-logic unit tests for the ElevenLabs ConvAI and Deepgram Voice
-// Agent /v1/realtime adapters, with injected fake upstream sockets (same
+// Translation-logic unit tests for the Deepgram Voice Agent
+// /v1/realtime adapter, with injected fake upstream sockets (same
 // FakeWS pattern as gemini-realtime-wire.test.js / gemini-live-stt.test.js).
 // Wire observables only: client audio → correct upstream frame; upstream
 // event → correct OpenAI client event; binary upstream frame → audio delta;
@@ -75,7 +75,6 @@ vi.mock("ws", () => ({
 }));
 
 
-import { createElevenLabsAdapter } from "@/sse/handlers/realtime/elevenlabsAdapter.js";
 import { createDeepgramAdapter } from "@/sse/handlers/realtime/deepgramAdapter.js";
 import deepgramRegistry from "open-sse/providers/registry/deepgram.js";
 
@@ -85,23 +84,6 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 afterEach(() => {
   FakeWS.instances.length = 0;
 });
-
-const EL_CONFIG = {
-  defaultModel: "conv-ai",
-  wsUrl: "wss://api.elevenlabs.io/v1/convai/conversation",
-  signedUrlEndpoint: "https://api.elevenlabs.io/v1/convai/conversation/get-signed-url",
-  authType: "apikey",
-  authHeader: "xi-api-key",
-  audioInRate: 16000,
-  audioOutRate: 16000,
-  residencyHosts: {
-    global: "api.elevenlabs.io",
-    us: "api.us.elevenlabs.io",
-    eu: "api.eu.residency.elevenlabs.io",
-    in: "api.in.residency.elevenlabs.io",
-    sg: "api.sg.residency.elevenlabs.io",
-  },
-};
 
 const DG_CONFIG = {
   defaultModel: "voice-agent",
@@ -120,9 +102,9 @@ const DG_CONFIG = {
 function mkCtx(overrides = {}) {
   const clientSent = [];
   const ctx = {
-    config: overrides.config ?? EL_CONFIG,
-    provider: overrides.provider ?? "elevenlabs",
-    model: overrides.model ?? "conv-ai",
+    config: overrides.config ?? DG_CONFIG,
+    provider: overrides.provider ?? "deepgram",
+    model: overrides.model ?? "voice-agent",
     voice: "Puck",
     instructions: "base instructions",
     credentials: overrides.credentials ?? {},
@@ -139,119 +121,6 @@ function mkCtx(overrides = {}) {
   };
   return { ctx, clientSent };
 }
-
-const CLIENT_AUDIO_B64 = Buffer.from("pcm16-input").toString("base64");
-
-function fireClientEvent(adapter, event) {
-  adapter.handleClientEvent(event);
-}
-
-// ── ElevenLabs ConvAI ─────────────────────────────────────────────────────
-
-describe("ElevenLabs ConvAI adapter", () => {
-  it("rejects a connection with a clear error when no agent id is configured", () => {
-    const { ctx } = mkCtx();
-    expect(() => createElevenLabsAdapter(ctx)).toThrow(/agent id/i);
-  });
-
-  it("client audio → user_audio_chunk on the plain agent_id URL when signed-url fails (public agent fallback)", async () => {
-    const fetchCalls = [];
-    const origFetch = global.fetch;
-    global.fetch = async (url, opts) => {
-      fetchCalls.push({ url: String(url), opts });
-      return { ok: false, status: 404 };
-    };
-    try {
-      const { ctx } = mkCtx({
-        apiKey: "xi-TEST",
-        credentials: { providerSpecificData: { agentId: "AGENT-1" } },
-      });
-      const adapter = createElevenLabsAdapter(ctx);
-      await adapter.connect();
-      await settle();
-      const ws = FakeWS.instances[0];
-
-      // Signed URL was attempted with xi-api-key header, then fell back
-      expect(fetchCalls).toHaveLength(1);
-      expect(fetchCalls[0].url).toContain("/v1/convai/conversation/get-signed-url");
-      expect(fetchCalls[0].opts.headers["xi-api-key"]).toBe("xi-TEST");
-      expect(ws.url).toContain("agent_id=AGENT-1");
-
-      // Initiation frame first, then client audio rides user_audio_chunk
-      expect(ws.sent[0]).toEqual({ type: "conversation_initiation_client_data" });
-      fireClientEvent(adapter, { type: "input_audio_buffer.append", audio: CLIENT_AUDIO_B64 });
-      expect(ws.sent[1]).toEqual({ user_audio_chunk: CLIENT_AUDIO_B64 });
-    } finally {
-      global.fetch = origFetch;
-    }
-  });
-
-  it("dials the signed_url when the signed-url call succeeds", async () => {
-    const origFetch = global.fetch;
-    global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ signed_url: "wss://user-signed.example/&token=tok" }) });
-    try {
-      const { ctx } = mkCtx({ credentials: { providerSpecificData: { agentId: "AGENT-2" } } });
-      const adapter = createElevenLabsAdapter(ctx);
-      await adapter.connect();
-      await settle();
-      expect(FakeWS.instances[0].url).toBe("wss://user-signed.example/&token=tok");
-    } finally {
-      global.fetch = origFetch;
-    }
-  });
-
-  it("upstream events map to the OpenAI client contract; formats parsed from metadata; ping → pong", async () => {
-    const { ctx, clientSent } = mkCtx({ credentials: { providerSpecificData: { agentId: "AGENT-3" } } });
-    const adapter = createElevenLabsAdapter(ctx);
-    await adapter.connect();
-    await settle();
-    const ws = FakeWS.instances[0];
-
-    // readiness → session.created + session.updated (voice omitted: agent-owned)
-    ws.emit({ type: "conversation_initiation_metadata", conversation_initiation_metadata_event: {
-      conversation_id: "conv-123", agent_output_audio_format: "pcm_24000", user_input_audio_format: "pcm_16000" } });
-    expect(clientSent[0].type).toBe("session.created");
-    expect(clientSent[0].session.id).toBeTypeOf("string");
-    expect(clientSent[0].session.model).toBe("conv-ai");
-    expect("voice" in clientSent[0].session).toBe(false);
-    expect(clientSent[1].type).toBe("session.updated");
-
-    // audio → response.audio.delta
-    ws.emit({ type: "audio", audio_event: { audio_base_64: "ABA=" } });
-    expect(clientSent[2]).toEqual({
-      type: "response.audio.delta", response_id: clientSent[2].response_id,
-      item_id: clientSent[2].item_id, output_index: 0, content_index: 0, delta: "ABA=",
-    });
-
-    // agent_response → response.audio_transcript.delta
-    ws.emit({ type: "agent_response", agent_response_event: { agent_response: "Hello there" } });
-    expect(clientSent[3]).toEqual({
-      type: "response.audio_transcript.delta", response_id: clientSent[2].response_id,
-      item_id: clientSent[2].item_id, output_index: 0, content_index: 0, delta: "Hello there",
-    });
-
-    // agent_response_complete → response.audio.done + response.done
-    ws.emit({ type: "agent_response_complete", agent_response_complete_event: { event_id: 7 } });
-    expect(clientSent[4]).toEqual({ type: "response.audio.done", response_id: clientSent[2].response_id, item_id: clientSent[2].item_id });
-    expect(clientSent[5]).toEqual({ type: "response.done", response: { id: clientSent[2].response_id, object: "realtime.response", status: "completed" } });
-
-    // interruption → input_audio_buffer.speech_started (+ response.cancelled,
-    // with freshly rotated response ids — not the completed turn's)
-    ws.emit({ type: "interruption", interruption_event: {} });
-    expect(clientSent[6].type).toBe("input_audio_buffer.speech_started");
-    expect(clientSent[7].type).toBe("response.cancelled");
-    expect(clientSent[7].response_id).not.toBe(clientSent[2].response_id);
-    expect(clientSent[6].item_id).not.toBe(clientSent[4].item_id);
-
-    // ping → pong with identical event_id
-    ws.emit({ type: "ping", ping_event: { event_id: 99 } });
-    expect(ws.sent.find((f) => f.type === "pong")).toEqual({ type: "pong", event_id: 99 });
-
-    // client_error → client error
-    ws.emit({ type: "client_error", error_event: { code: 500, error_name: "internal", message: "boom" } });
-    expect(clientSent[8]).toEqual({ type: "error", error: { type: "upstream_error", message: "internal (500): boom" } });
-  });
-});
 
 // ── Deepgram Voice Agent ──────────────────────────────────────────────────
 
@@ -358,79 +227,6 @@ describe("Deepgram Voice Agent adapter", () => {
     // Error → client error
     ws.emit({ type: "Error", description: "bad request", code: 400 });
     expect(clientSent[8]).toEqual({ type: "error", error: { type: "upstream_error", message: "400: bad request" } });
-  });
-});
-
-// ── ElevenLabs residency host selection ───────────────────────────────────
-
-describe("ElevenLabs ConvAI residency", () => {
-  const CASES = [
-    ["global", "api.elevenlabs.io"],
-    ["us", "api.us.elevenlabs.io"],
-    ["eu", "api.eu.residency.elevenlabs.io"],
-    ["in", "api.in.residency.elevenlabs.io"],
-    ["sg", "api.sg.residency.elevenlabs.io"],
-  ];
-
-  it.each(CASES)("?region=%s relays the signed-url REST call AND the WS dial through the %s host", async (region, host) => {
-    const fetchCalls = [];
-    const origFetch = global.fetch;
-    global.fetch = async (url) => {
-      fetchCalls.push({ url: String(url) });
-      return { ok: false, status: 404 };
-    };
-    try {
-      const { ctx } = mkCtx({
-        credentials: { providerSpecificData: { agentId: "AGENT-R" } },
-        query: new URLSearchParams(`region=${region}`),
-      });
-      const adapter = createElevenLabsAdapter(ctx);
-      await adapter.connect();
-      await settle();
-
-      expect(fetchCalls[0].url).toBe(`https://${host}/v1/convai/conversation/get-signed-url?agent_id=AGENT-R`);
-      expect(FakeWS.instances[0].url).toBe(`wss://${host}/v1/convai/conversation?agent_id=AGENT-R`);
-    } finally {
-      global.fetch = origFetch;
-    }
-  });
-
-  it("dials the signed_url from the response even under a residency host", async () => {
-    const origFetch = global.fetch;
-    global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ signed_url: "wss://api.eu.residency.elevenlabs.io/v1/convai/conversation?agent_id=AGENT-R&token=t" }) });
-    try {
-      const { ctx } = mkCtx({ credentials: { providerSpecificData: { agentId: "AGENT-R", residency: "eu" } } });
-      const adapter = createElevenLabsAdapter(ctx);
-      await adapter.connect();
-      await settle();
-      expect(FakeWS.instances[0].url).toContain("api.eu.residency.elevenlabs.io");
-    } finally {
-      global.fetch = origFetch;
-    }
-  });
-
-  it("no region anywhere → global default, URLs byte-identical to today", async () => {
-    const fetchCalls = [];
-    const origFetch = global.fetch;
-    global.fetch = async (url) => { fetchCalls.push({ url: String(url) }); return { ok: false, status: 404 }; };
-    try {
-      const { ctx } = mkCtx({ credentials: { providerSpecificData: { agentId: "AGENT-D" } } });
-      const adapter = createElevenLabsAdapter(ctx);
-      await adapter.connect();
-      await settle();
-      expect(fetchCalls[0].url).toContain("https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=AGENT-D");
-      expect(FakeWS.instances[0].url).toContain("wss://api.elevenlabs.io/v1/convai/conversation?agent_id=AGENT-D");
-    } finally {
-      global.fetch = origFetch;
-    }
-  });
-
-  it("unknown region → clear error naming the valid values", () => {
-    const { ctx } = mkCtx({
-      credentials: { providerSpecificData: { agentId: "AGENT-X" } },
-      query: new URLSearchParams("region=mars"),
-    });
-    expect(() => createElevenLabsAdapter(ctx)).toThrow(/global.*us.*eu.*in.*sg/);
   });
 });
 

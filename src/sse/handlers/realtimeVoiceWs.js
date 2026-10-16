@@ -103,8 +103,7 @@ export async function handleRealtimeVoiceConnection(clientWs, req) {
     credentials = await getProviderCredentials("gemini", null, null);
     apiKey = credentials?.apiKey || process.env.GEMINI_API_KEY;
   }
-  if (!apiKey && provider !== "elevenlabs") {
-    // ElevenLabs public agents dial with just agent_id — a key is optional.
+  if (!apiKey) {
     const errMsg = `No API key configured for ${provider}. Please add a ${provider} connection in 9Router Dashboard or set ${provider.toUpperCase()}_API_KEY environment variable.`;
     log.error("REALTIME_VOICE", errMsg);
     clientWs.send(
