@@ -230,7 +230,25 @@ async function setupDeepgramUpstream({ clientWs, credentials, model, language, s
         const isFinal = Boolean(msg.is_final);
         const words = alt.words || [];
 
+        // Interim results re-report the same segment every time it firms up, so
+        // they must never be appended as committed words — that is what printed
+        // the transcript twice. Interim text rides `partial`, which the card
+        // renders as a provisional line and clears when the utterance commits.
+        if (!isFinal) {
+          if (alt.transcript?.trim()) {
+            clientWs.send(JSON.stringify({ type: "partial", text: alt.transcript }));
+          }
+          return;
+        }
+
+        // A client `Finalize` makes Deepgram re-emit the segment it already
+        // committed. Skip anything we have already stored so those words are not
+        // counted twice. Words carry their own timings, so overlap is detectable.
+        let lastEnd = sessionWords.length ? sessionWords[sessionWords.length - 1].end : -1;
+
         for (const w of words) {
+          if (typeof w.start === "number" && w.start <= lastEnd) continue;
+
           const wordObj = {
             word: w.punctuated_word || w.word,
             start: w.start,
@@ -239,9 +257,8 @@ async function setupDeepgramUpstream({ clientWs, credentials, model, language, s
             isFinal,
           };
 
-          if (isFinal) {
-            sessionWords.push(wordObj);
-          }
+          sessionWords.push(wordObj);
+          if (typeof wordObj.end === "number") lastEnd = wordObj.end;
 
           clientWs.send(JSON.stringify({
             type: "word",
@@ -250,7 +267,7 @@ async function setupDeepgramUpstream({ clientWs, credentials, model, language, s
         }
 
         // If final sentence or chunk, also emit aggregated chunk
-        if (isFinal && alt.transcript?.trim()) {
+        if (alt.transcript?.trim()) {
           const recentChunks = chunkWords(sessionWords.slice(-20));
           const latestChunk = recentChunks[recentChunks.length - 1];
           if (latestChunk) {
