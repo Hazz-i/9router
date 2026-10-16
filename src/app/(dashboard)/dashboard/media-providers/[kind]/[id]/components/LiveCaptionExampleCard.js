@@ -23,9 +23,8 @@ export function LiveCaptionExampleCard({ providerId }) {
   const [isRecording, setIsRecording] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("idle"); // idle | connecting | connected | error
   const [statusMessage, setStatusMessage] = useState("");
-  const [words, setWords] = useState([]);
-  const [partialTranscript, setPartialTranscript] = useState("");
-  const [activeWordIndex, setActiveWordIndex] = useState(-1);
+  const [transcript, setTranscript] = useState({ words: [], partial: "" });
+  const { words, partialTranscript } = transcript;
   const [subtitles, setSubtitles] = useState({ srt: "", ass: "" });
   const [localEndpoint, setLocalEndpoint] = useState("");
 
@@ -165,12 +164,10 @@ export function LiveCaptionExampleCard({ providerId }) {
           if (data.type === "ready") {
             setStatusMessage(`Ready. Upstream provider: ${data.upstream}`);
           } else if (data.type === "partial") {
-            setPartialTranscript(data.text || "");
+            setTranscript((prev) => ({ ...prev, partial: data.text || "" }));
           } else if (data.type === "word") {
-            setPartialTranscript("");
-            setWords((prev) => {
-              const updated = [...prev, data];
-              setActiveWordIndex(updated.length - 1);
+            setTranscript((prev) => {
+              const updated = [...prev.words, data];
 
               // Update live SRT and ASS
               const chunks = chunkWords(updated);
@@ -179,10 +176,10 @@ export function LiveCaptionExampleCard({ providerId }) {
                 ass: chunksToAss(chunks),
               });
 
-              return updated;
+              return { words: updated, partial: "" };
             });
           } else if (data.type === "chunk") {
-            setPartialTranscript("");
+            setTranscript((prev) => ({ ...prev, partial: "" }));
           } else if (data.type === "error") {
             setStatusMessage(`Error: ${data.error}`);
             setConnectionStatus("error");
@@ -211,9 +208,7 @@ export function LiveCaptionExampleCard({ providerId }) {
   };
 
   const handleClear = () => {
-    setWords([]);
-    setPartialTranscript("");
-    setActiveWordIndex(-1);
+    setTranscript({ words: [], partial: "" });
     setSubtitles({ srt: "", ass: "" });
   };
 
@@ -229,7 +224,7 @@ export function LiveCaptionExampleCard({ providerId }) {
               <Badge variant="primary" size="sm">REALTIME WS</Badge>
             </div>
             <p className="text-xs text-text-muted mt-0.5">
-              Stream live microphone audio directly to upstream providers via NineRouter with word-level karaoke sync.
+              Stream live microphone audio directly to upstream providers via NineRouter for real-time transcription.
             </p>
           </div>
 
@@ -329,37 +324,28 @@ export function LiveCaptionExampleCard({ providerId }) {
           )}
         </div>
 
-        {/* Live Karaoke Caption Visualizer */}
+        {/* Live Caption Transcript */}
         <div className="relative min-h-[140px] max-h-[220px] overflow-y-auto p-4 rounded-xl border border-border/60 bg-surface-2/40 backdrop-blur-sm flex flex-col justify-between">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-base sm:text-lg leading-relaxed">
+          <div className="text-base sm:text-lg leading-relaxed">
             {words.length === 0 && !partialTranscript ? (
               <span className="text-xs text-text-muted/60 italic">
                 {isRecording ? "Listening... Speak into your microphone" : "Click 'Start Microphone' to begin real-time live captioning"}
               </span>
             ) : (
-              words.map((w, idx) => {
-                const isActive = idx === activeWordIndex;
-                return (
-                  <span
-                    key={`${w.word}-${w.start}-${idx}`}
-                    className={`transition-all duration-200 px-1 py-0.5 rounded ${
-                      isActive
-                        ? "bg-amber-400 text-black font-bold scale-105 shadow-sm"
-                        : "text-text-main hover:text-primary font-medium"
-                    }`}
-                    title={`Start: ${w.start?.toFixed(2)}s | End: ${w.end?.toFixed(2)}s`}
-                  >
-                    {w.word}
+              <>
+                {words.length > 0 && (
+                  <span className="text-text-main font-medium">
+                    {words.map((w) => w.word).join(" ")}
                   </span>
-                );
-              })
+                )}
+                {partialTranscript && (
+                  <span className="text-text-muted italic">
+                    {words.length > 0 ? " " : ""}{partialTranscript}
+                  </span>
+                )}
+              </>
             )}
-            {partialTranscript && (
-              <span className="basis-full text-sm text-text-muted italic">
-                In progress · {partialTranscript}
-              </span>
-            )}
-            <div ref={transcriptEndRef} />
+            <span ref={transcriptEndRef} />
           </div>
 
           {words.length > 0 && (
