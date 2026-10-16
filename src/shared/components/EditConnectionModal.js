@@ -22,6 +22,8 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
     organization: "",
   });
   const [cloudflareData, setCloudflareData] = useState({ accountId: "" });
+  const [elevenLabsData, setElevenLabsData] = useState({ agentId: "" });
+  const [deepgramData, setDeepgramData] = useState({ thinkUrl: "", thinkApiKey: "" });
   const [awsData, setAwsData] = useState({ profile: "", region: "", accessKeyId: "", sessionToken: "" });
   const [clearAwsSessionToken, setClearAwsSessionToken] = useState(false);
   const [region, setRegion] = useState("");
@@ -50,6 +52,13 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       if (connection.provider === "cloudflare-ai" && connection.providerSpecificData) {
         setCloudflareData({ accountId: connection.providerSpecificData.accountId || "" });
       }
+      setElevenLabsData({
+        agentId: connection.provider === "elevenlabs" ? connection.providerSpecificData?.agentId || "" : "",
+      });
+      setDeepgramData({
+        thinkUrl: connection.provider === "deepgram" ? connection.providerSpecificData?.thinkUrl || "" : "",
+        thinkApiKey: "",
+      });
       if (AI_PROVIDERS?.[connection.provider]?.credentialForm === "aws") {
         const psd = connection.providerSpecificData || {};
         setAwsData({
@@ -74,6 +83,8 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
   const isOAuth = connection?.authType === "oauth";
   const isAzure = connection?.provider === "azure";
   const isCloudflareAi = connection?.provider === "cloudflare-ai";
+  const isElevenLabs = connection?.provider === "elevenlabs";
+  const isDeepgram = connection?.provider === "deepgram";
   const usesAwsCredentialForm = AI_PROVIDERS?.[connection?.provider]?.credentialForm === "aws";
   const isCompatible = connection
     ? (isOpenAICompatibleProvider(connection.provider) || isAnthropicCompatibleProvider(connection.provider))
@@ -191,6 +202,15 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       if (isCloudflareAi) {
         updates.providerSpecificData = { accountId: cloudflareData.accountId };
       }
+      if (isElevenLabs) {
+        updates.providerSpecificData = { agentId: elevenLabsData.agentId.trim() };
+      }
+      if (isDeepgram) {
+        updates.providerSpecificData = {
+          thinkUrl: deepgramData.thinkUrl.trim(),
+          ...(deepgramData.thinkApiKey ? { thinkApiKey: deepgramData.thinkApiKey } : {}),
+        };
+      }
       if (usesAwsCredentialForm) {
         updates.providerSpecificData = buildAwsSpecificData();
       }
@@ -286,6 +306,47 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
                 onChange={(e) => setAzureData({ ...azureData, organization: e.target.value })}
                 placeholder="Organization ID"
                 hint="Required for billing"
+              />
+            </div>
+          </div>
+        )}
+
+        {isElevenLabs && (
+          <div className="bg-sidebar/50 p-4 rounded-lg border border-accent/20">
+            <h3 className="font-semibold mb-3 text-sm">ElevenLabs Realtime Voice Agent</h3>
+            <Input
+              label="ConvAI Agent ID (optional)"
+              value={elevenLabsData.agentId}
+              onChange={(e) => setElevenLabsData({ ...elevenLabsData, agentId: e.target.value })}
+              placeholder="Your ConvAI agent ID"
+              hint="Only needed for Realtime Voice Agent; TTS and STT do not use this setting."
+            />
+          </div>
+        )}
+
+        {isDeepgram && (
+          <div className="bg-sidebar/50 p-4 rounded-lg border border-accent/20">
+            <h3 className="font-semibold mb-1 text-sm">Deepgram Voice Agent LLM (optional)</h3>
+            <p className="text-xs text-text-muted mb-3">
+              Deepgram runs its built-in think models (Google, OpenAI, Anthropic, Groq) on its own credentials — leave
+              both fields empty and it just works. Fill them in only to point the think stage at your own
+              OpenAI-compatible LLM instead.
+            </p>
+            <div className="flex flex-col gap-3">
+              <Input
+                label="Think-stage chat completions URL (optional)"
+                value={deepgramData.thinkUrl}
+                onChange={(e) => setDeepgramData({ ...deepgramData, thinkUrl: e.target.value })}
+                placeholder="https://your-llm.example/v1/chat/completions"
+                hint="Use an OpenAI-compatible chat-completions endpoint."
+              />
+              <Input
+                label="Think-stage LLM API key (optional)"
+                type="password"
+                value={deepgramData.thinkApiKey}
+                onChange={(e) => setDeepgramData({ ...deepgramData, thinkApiKey: e.target.value })}
+                placeholder="Enter a new LLM API key"
+                hint="Leave blank to keep the saved key."
               />
             </div>
           </div>

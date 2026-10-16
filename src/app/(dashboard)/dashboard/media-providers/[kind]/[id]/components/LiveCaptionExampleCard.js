@@ -91,7 +91,9 @@ export function LiveCaptionExampleCard({ providerId }) {
 
   // Auto-scroll transcript container to bottom when new words arrive
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (words.length === 0) return;
+    const transcript = transcriptEndRef.current?.closest(".overflow-y-auto");
+    transcript?.scrollTo({ top: transcript.scrollHeight, behavior: "smooth" });
   }, [words]);
 
   const endpoint = useTunnel ? tunnelEndpoint : localEndpoint;

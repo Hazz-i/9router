@@ -7,10 +7,16 @@ export function usesAwsCredentialForm(provider) {
 export function toProviderConnectionResponse(connection) {
   const { apiKey, accessToken, refreshToken, idToken, ...safe } = connection;
 
-  if (!usesAwsCredentialForm(connection.provider) || !connection.providerSpecificData) {
-    return safe;
-  }
+  if (!connection.providerSpecificData) return safe;
 
-  const { sessionToken, ...providerSpecificData } = connection.providerSpecificData;
+  let providerSpecificData = connection.providerSpecificData;
+  if (usesAwsCredentialForm(connection.provider)) {
+    const { sessionToken, ...safeProviderSpecificData } = providerSpecificData;
+    providerSpecificData = safeProviderSpecificData;
+  }
+  if (connection.provider === "deepgram") {
+    const { thinkApiKey, ...safeProviderSpecificData } = providerSpecificData;
+    providerSpecificData = safeProviderSpecificData;
+  }
   return { ...safe, providerSpecificData };
 }

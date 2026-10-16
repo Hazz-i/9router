@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Card, Button, Badge } from "@/shared/components";
-import { getProviderAlias } from "@/shared/constants/providers";
+import { AI_PROVIDERS, getProviderAlias } from "@/shared/constants/providers";
+import { getModelsByProviderId } from "@/shared/constants/models";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { Row } from "./exampleShared";
 
@@ -14,10 +15,53 @@ const GEMINI_VOICES = [
   { id: "Aoede", label: "Aoede (Clear & Soft)" },
 ];
 
+const REALTIME_PROVIDER_COPY = {
+  gemini: { name: "Gemini Live", voices: GEMINI_VOICES },
+  elevenlabs: {
+    name: "ElevenLabs Agents",
+    note: "Realtime Voice Agent only (not TTS/STT) needs a ConvAI Agent ID in provider settings — without it the agent cannot be reached.",
+  },
+  deepgram: { name: "Deepgram Voice Agent" },
+};
+
+const getRealtimeOptions = (providers, field, includeCustom = false) => (providers || []).flatMap((provider) => [
+  ...(provider[field] || []).map((option) => ({
+    value: `${provider.type}/${option.id}`,
+    label: `${provider.name || provider.type} · ${option.name || option.id}`,
+  })),
+  ...(includeCustom && (field === "models" || provider.customVoice)
+    ? [{ value: `${provider.type}/custom:`, label: `${provider.name || provider.type} · Custom…` }]
+    : []),
+]);
+
 export function RealtimeVoiceExampleCard({ providerId }) {
   const providerAlias = getProviderAlias(providerId);
+  const providerCopy = REALTIME_PROVIDER_COPY[providerId] || { name: `${providerAlias} Realtime` };
+  const realtimeConfig = AI_PROVIDERS[providerId]?.realtimeConfig || {};
+  const realtimeModel = realtimeConfig.defaultModel
+    || getModelsByProviderId(providerId).find((model) => model.kinds?.includes("realtime") || model.kind === "realtime")?.id
+    || "";
+  const voices = providerCopy.voices || [];
+  const thinkConfig = realtimeConfig.think || {};
+  const speakConfig = realtimeConfig.speak || {};
+  const listenConfig = realtimeConfig.listen || {};
+  const thinkProviders = thinkConfig.providers || [];
+  const speakOptions = getRealtimeOptions(speakConfig.providers, "voices", true);
+  const listenOptions = getRealtimeOptions(listenConfig.providers, "models", true);
+  const defaultThinkProvider = thinkConfig.provider?.type || "";
+  const defaultThinkModel = thinkConfig.provider?.model || "";
+  const defaultSpeak = speakConfig.provider ? `${speakConfig.provider.type}/${speakConfig.provider.model}` : "";
+  const defaultListen = listenConfig.provider ? `${listenConfig.provider.type}/${listenConfig.provider.model}` : "";
 
   const [selectedVoice, setSelectedVoice] = useState("Puck");
+  const [selectedThinkProvider, setSelectedThinkProvider] = useState(defaultThinkProvider);
+  const [selectedThinkModel, setSelectedThinkModel] = useState(defaultThinkModel);
+  const [selectedSpeak, setSelectedSpeak] = useState(defaultSpeak);
+  const [selectedListen, setSelectedListen] = useState(defaultListen);
+  const [customThinkModel, setCustomThinkModel] = useState("");
+  const [customSpeakId, setCustomSpeakId] = useState("");
+  const [customListenId, setCustomListenId] = useState("");
+  const [greeting, setGreeting] = useState("");
   const [instructions, setInstructions] = useState(
     "You are a friendly, helpful AI voice assistant. Speak naturally and concisely in Indonesian or English."
   );
@@ -114,11 +158,38 @@ export function RealtimeVoiceExampleCard({ providerId }) {
   const endpoint = useTunnel ? tunnelEndpoint : localEndpoint;
   const wsProtocol = endpoint.startsWith("https") ? "wss:" : "ws:";
   const wsHost = endpoint.replace(/^https?:\/\//, "");
-  const wsUrl = `${wsProtocol}//${wsHost}/v1/realtime?model=gemini-3.8-live&voice=${encodeURIComponent(selectedVoice)}${apiKey ? `&apiKey=${encodeURIComponent(apiKey)}` : ""}`;
+  // The gateway resolves the provider from the model string. An unqualified id
+  // like "voice-agent" is ambiguous and resolves to the wrong provider, so always
+  // send "<provider>/<model>".
+  const qualifiedModel = realtimeModel.includes("/") ? realtimeModel : `${providerId}/${realtimeModel}`;
+  const realtimeParams = new URLSearchParams({ model: qualifiedModel });
+  if (voices.length) realtimeParams.set("voice", selectedVoice);
+  if (providerId === "deepgram") {
+    const thinkModel = selectedThinkModel === "__custom__" ? customThinkModel.trim() : selectedThinkModel;
+    if (selectedThinkProvider && thinkModel) realtimeParams.set("think", `${selectedThinkProvider}/${selectedThinkModel === "__custom__" ? `custom:${thinkModel}` : thinkModel}`);
+    if (selectedSpeak && (!selectedSpeak.endsWith("/custom:") || customSpeakId.trim())) realtimeParams.set("speak", `${selectedSpeak}${selectedSpeak.endsWith("/custom:") ? customSpeakId.trim() : ""}`);
+    if (selectedListen && (!selectedListen.endsWith("/custom:") || customListenId.trim())) realtimeParams.set("listen", `${selectedListen}${selectedListen.endsWith("/custom:") ? customListenId.trim() : ""}`);
+    if (greeting) realtimeParams.set("greeting", greeting);
+  }
+  if (apiKey) realtimeParams.set("apiKey", apiKey);
+  const wsUrl = `${wsProtocol}//${wsHost}/v1/realtime?${realtimeParams}`;
+  const selectedThinkProviderOptions = thinkProviders.find((provider) => provider.type === selectedThinkProvider);
+  const thinkModelOptions = selectedThinkProviderOptions?.models || [];
+  const thinkProviderOptions = thinkProviders.length
+    ? thinkProviders
+    : defaultThinkProvider ? [{ type: defaultThinkProvider, name: defaultThinkProvider }] : [];
+  const availableSpeakOptions = speakOptions.length
+    ? speakOptions
+    : defaultSpeak ? [{ value: defaultSpeak, label: defaultSpeak }] : [];
+  const availableListenOptions = listenOptions.length
+    ? listenOptions
+    : defaultListen ? [{ value: defaultListen, label: defaultListen }] : [];
 
   // Auto-scroll transcript container to bottom when messages update
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messages.length === 0) return;
+    const transcript = transcriptEndRef.current?.closest(".overflow-y-auto");
+    transcript?.scrollTo({ top: transcript.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
   // Convert Float32Array from microphone to 16-bit PCM Linear
@@ -245,7 +316,7 @@ export function RealtimeVoiceExampleCard({ providerId }) {
           JSON.stringify({
             type: "session.update",
             session: {
-              voice: selectedVoice,
+              ...(voices.length ? { voice: selectedVoice } : {}),
               instructions,
               input_audio_format: "pcm16",
               output_audio_format: "pcm16",
@@ -343,10 +414,10 @@ export function RealtimeVoiceExampleCard({ providerId }) {
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold tracking-tight">Realtime Voice Agent</h2>
             <Badge variant="primary" size="sm">OpenAI Realtime Protocol</Badge>
-            <Badge variant="neutral" size="sm">Gemini Live</Badge>
+            <Badge variant="neutral" size="sm">{providerCopy.name}</Badge>
           </div>
           <p className="text-sm text-text-muted">
-            Bidirectional real-time voice conversation with Gemini 2.0 Flash via WebSocket (`/v1/realtime`).
+            Bidirectional real-time voice conversation with {providerCopy.name} via WebSocket (`/v1/realtime`).
           </p>
         </div>
 
@@ -361,21 +432,142 @@ export function RealtimeVoiceExampleCard({ providerId }) {
         </div>
       </div>
 
+      {providerCopy.note && (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          {providerCopy.note}
+        </p>
+      )}
+
       {/* Settings Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border border-border/60 rounded-xl p-4 bg-surface/50">
-        <div>
-          <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">AI Voice</label>
-          <select
-            value={selectedVoice}
-            onChange={(e) => setSelectedVoice(e.target.value)}
-            disabled={isCalling}
-            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
-          >
-            {GEMINI_VOICES.map((v) => (
-              <option key={v.id} value={v.id}>{v.label}</option>
-            ))}
-          </select>
-        </div>
+        {providerId === "deepgram" && (
+          <>
+            <div>
+              <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">LLM (think) · Provider</label>
+              <select
+                value={selectedThinkProvider}
+                onChange={(e) => {
+                  const provider = thinkProviders.find((option) => option.type === e.target.value);
+                  setSelectedThinkProvider(e.target.value);
+                  setSelectedThinkModel(provider?.models?.[0]?.id || "");
+                }}
+                disabled={isCalling}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+              >
+                {thinkProviderOptions.map((provider) => (
+                  <option key={provider.type} value={provider.type}>{provider.name || provider.type}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">LLM (think) · Model</label>
+              <select
+                value={selectedThinkModel}
+                onChange={(e) => setSelectedThinkModel(e.target.value)}
+                disabled={isCalling}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+              >
+                {(thinkModelOptions.length ? thinkModelOptions : selectedThinkModel && selectedThinkModel !== "__custom__" ? [{ id: selectedThinkModel }] : []).map((model) => (
+                  <option key={model.id} value={model.id}>{model.name || model.id}</option>
+                ))}
+                <option value="__custom__">Custom…</option>
+              </select>
+              {selectedThinkModel === "__custom__" && (
+                <input
+                  type="text"
+                  value={customThinkModel}
+                  onChange={(e) => setCustomThinkModel(e.target.value)}
+                  disabled={isCalling}
+                  className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+                  placeholder="Enter a model ID"
+                  aria-label="Custom LLM model ID"
+                />
+              )}
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">Greeting (optional)</label>
+              <input
+                type="text"
+                value={greeting}
+                onChange={(e) => setGreeting(e.target.value)}
+                disabled={isCalling}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+                placeholder="The first thing the agent says..."
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">Agent prompt</label>
+              <textarea
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                disabled={isCalling}
+                rows={2}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none disabled:opacity-50"
+                placeholder="Prompt for the voice agent..."
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">Voice (speak)</label>
+              <select
+                value={selectedSpeak}
+                onChange={(e) => setSelectedSpeak(e.target.value)}
+                disabled={isCalling}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+              >
+                {availableSpeakOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+              {selectedSpeak.endsWith("/custom:") && (
+                <input
+                  type="text"
+                  value={customSpeakId}
+                  onChange={(e) => setCustomSpeakId(e.target.value)}
+                  disabled={isCalling}
+                  className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+                  placeholder="Enter a voice ID"
+                  aria-label="Custom voice ID"
+                />
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">Listen (STT)</label>
+              <select
+                value={selectedListen}
+                onChange={(e) => setSelectedListen(e.target.value)}
+                disabled={isCalling}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+              >
+                {availableListenOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+              {selectedListen.endsWith("/custom:") && (
+                <input
+                  type="text"
+                  value={customListenId}
+                  onChange={(e) => setCustomListenId(e.target.value)}
+                  disabled={isCalling}
+                  className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+                  placeholder="Enter a model ID"
+                  aria-label="Custom listen model ID"
+                />
+              )}
+            </div>
+          </>
+        )}
+
+        {voices.length > 0 && (
+          <div>
+            <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">AI Voice</label>
+            <select
+              value={selectedVoice}
+              onChange={(e) => setSelectedVoice(e.target.value)}
+              disabled={isCalling}
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+            >
+              {voices.map((v) => (
+                <option key={v.id} value={v.id}>{v.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -406,7 +598,7 @@ export function RealtimeVoiceExampleCard({ providerId }) {
           </div>
         </div>
 
-        <div className="md:col-span-2">
+        {providerId !== "deepgram" && <div className="md:col-span-2">
           <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">System Instructions</label>
           <textarea
             value={instructions}
@@ -416,7 +608,7 @@ export function RealtimeVoiceExampleCard({ providerId }) {
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none disabled:opacity-50"
             placeholder="Prompt for the voice agent..."
           />
-        </div>
+        </div>}
       </div>
 
       {/* Main Interactive Call Box */}
@@ -461,7 +653,7 @@ export function RealtimeVoiceExampleCard({ providerId }) {
             {isCalling ? statusMessage || (connectionStatus === "speaking" ? "AI is speaking..." : "Listening to you...") : "Ready to start voice conversation"}
           </p>
           <p className="text-xs text-text-muted mt-0.5">
-            {isCalling ? "Speak into your microphone. You can interrupt anytime." : "Click below to connect your microphone and talk to Gemini Live."}
+            {isCalling ? "Speak into your microphone. You can interrupt anytime." : `Click below to connect your microphone and talk to ${providerCopy.name}.`}
           </p>
         </div>
 
@@ -554,11 +746,15 @@ export function RealtimeVoiceExampleCard({ providerId }) {
         {(() => {
           const baseEndpoint = wsUrl.split("?")[0];
           const activeKey = apiKey || "YOUR_9ROUTER_KEY";
+          const snippetParams = new URLSearchParams(realtimeParams);
+          snippetParams.delete("apiKey");
+          const deviceParams = new URLSearchParams(snippetParams);
+          deviceParams.set("apiKey", activeKey);
           const snippets = {
             nodejs: `// Node.js OpenAI Realtime Compatible Client
 import WebSocket from "ws";
 
-const WS_URL = "${baseEndpoint}?model=gemini-3.8-live&voice=${selectedVoice}";
+const WS_URL = "${baseEndpoint}?${snippetParams}";
 const ws = new WebSocket(WS_URL, {
   headers: { Authorization: "Bearer ${activeKey}" },
 });
@@ -570,8 +766,7 @@ ws.on("open", () => {
   ws.send(JSON.stringify({
     type: "session.update",
     session: {
-      voice: "${selectedVoice}",
-      instructions: "${instructions.replace(/"/g, '\\"')}",
+${selectedVoice ? `      voice: "${selectedVoice}",\n` : ""}      instructions: "${instructions.replace(/"/g, '\\"')}",
       input_audio_format: "pcm16",
       output_audio_format: "pcm16",
     },
@@ -601,7 +796,7 @@ import json
 import base64
 
 async def voice_session():
-    uri = "${baseEndpoint}?model=gemini-3.8-live&voice=${selectedVoice}"
+    uri = "${baseEndpoint}?${snippetParams}"
     headers = {"Authorization": "Bearer ${activeKey}"}
     
     async with websockets.connect(uri, extra_headers=headers) as ws:
@@ -609,8 +804,7 @@ async def voice_session():
         await ws.send(json.dumps({
             "type": "session.update",
             "session": {
-                "voice": "${selectedVoice}",
-                "instructions": "${instructions.replace(/"/g, '\\"')}"
+${selectedVoice ? `                "voice": "${selectedVoice}",\n` : ""}                "instructions": "${instructions.replace(/"/g, '\\"')}"
             }
         }))
         
@@ -639,7 +833,7 @@ WebsocketsClient client;
 const char* ssid = "YOUR_WIFI_SSID";
 const char* password = "YOUR_WIFI_PASSWORD";
 // Tip: Use ?apiKey= query parameter for easy authentication on microcontrollers
-const char* ws_url = "${baseEndpoint}?model=gemini-3.8-live&voice=${selectedVoice}&apiKey=${activeKey}";
+const char* ws_url = "${baseEndpoint}?${deviceParams}";
 
 void onMessageCallback(WebsocketsMessage message) {
   if (message.isText()) {
@@ -668,7 +862,7 @@ void setup() {
   client.connect(ws_url);
 
   // Initialize voice session
-  client.send("{\\"type\\":\\"session.update\\",\\"session\\":{\\"voice\\":\\"${selectedVoice}\\",\\"instructions\\":\\"Answer briefly.\\"}}");
+  client.send("{\\"type\\":\\"session.update\\",\\"session\\":{${selectedVoice ? `\\"voice\\":\\"${selectedVoice}\\",` : ""}\\"instructions\\":\\"Answer briefly.\\"}}");
 }
 
 void loop() {
@@ -684,10 +878,10 @@ void loop() {
 }`,
 
             wscat: `# Connect directly via wscat CLI
-wscat -c "${baseEndpoint}?model=gemini-3.8-live&voice=${selectedVoice}&apiKey=${activeKey}"
+wscat -c "${baseEndpoint}?${deviceParams}"
 
 # In the wscat session, send session initialization:
-{"type":"session.update","session":{"voice":"${selectedVoice}","instructions":"Halo Gemini!"}}`,
+{"type":"session.update","session":{${selectedVoice ? `"voice":"${selectedVoice}",` : ""}"instructions":"Answer briefly."}}`,
           };
 
           const currentSnippet = snippets[selectedLang] || snippets.nodejs;
