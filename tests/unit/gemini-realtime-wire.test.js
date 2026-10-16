@@ -168,4 +168,15 @@ describe("Gemini Live realtime voice wire format", () => {
     });
     expect(JSON.stringify(upstream.sent)).not.toContain("mediaChunks");
   });
+
+  it("streams a silence heartbeat after setup so server VAD can close turns — clients send speech bursts only", async () => {
+    // Without a sustained silence feed, Gemini Live sends voiceActivity
+    // ACTIVITY_START but never ACTIVITY_END: the model never produces a turn.
+    const { upstream } = await openSession();
+    await vi.waitFor(() => expect(upstream.sent.length).toBeGreaterThanOrEqual(3)); // setup + ≥2 heartbeat frames
+    const silence = Buffer.alloc(2048).toString("base64"); // 0.125s of 16k PCM16 zeros
+    for (const f of upstream.sent.slice(1)) {
+      expect(f).toEqual({ realtimeInput: { audio: { mimeType: "audio/pcm;rate=16000", data: silence } } });
+    }
+  });
 });

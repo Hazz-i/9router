@@ -16,12 +16,18 @@ export default {
   serviceKinds: [
     "tts",
     "stt",
-    "liveCaption"
+    "liveCaption",
+    "realtime"
   ],
   // Params the Scribe API accepts; mirrored per-model in `models[].params` below,
   // which is what the dashboard example card gates its fields on. The engine reads
   // the incoming request's own fields, so a new scribe model needs only a `models` entry.
   models: [
+    {
+      id: "conv-ai",
+      name: "ConvAI (Realtime Voice Agent)",
+      kinds: ["realtime"]
+    },
     {
       id: "scribe_v2",
       name: "Scribe v2 (High Accuracy)",
@@ -77,6 +83,31 @@ export default {
     authType: "apikey",
     authHeader: "xi-api-key",
     format: "elevenlabs-scribe",
+  },
+  realtimeConfig: {
+    defaultModel: "conv-ai",
+    // NO auth header on the WS itself. Private agents require a signed URL
+    // minted server-side via signedUrlEndpoint with the stored xi-api-key;
+    // public agents dial wsUrl?agent_id=… directly (adapter falls back).
+    wsUrl: "wss://api.elevenlabs.io/v1/convai/conversation",
+    signedUrlEndpoint: "https://api.elevenlabs.io/v1/convai/conversation/get-signed-url",
+    authType: "apikey",
+    authHeader: "xi-api-key",
+    // Audio formats are reported per-session via conversation_initiation_metadata
+    // ("pcm_16000"-style enums) and parsed by the adapter; these are usage defaults.
+    audioInRate: 16000,
+    audioOutRate: 16000,
+    // ConvAI data-residency hosts (wss://<host>/v1/convai/conversation and the
+    // matching signed-url REST endpoint swap this host). Selected per connection
+    // via providerSpecificData.residency or ?region= on the realtime URL;
+    // default global keeps the URLs above untouched.
+    residencyHosts: {
+      global: "api.elevenlabs.io",
+      us: "api.us.elevenlabs.io",
+      eu: "api.eu.residency.elevenlabs.io",
+      in: "api.in.residency.elevenlabs.io",
+      sg: "api.sg.residency.elevenlabs.io",
+    },
   },
   ttsConfig: {
     baseUrl: "https://api.elevenlabs.io/v1/text-to-speech",
